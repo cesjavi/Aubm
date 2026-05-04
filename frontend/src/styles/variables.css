@@ -1,0 +1,77 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
+
+:root {
+  /* Color Palette - Modern Deep Blue & Violet */
+  --primary: hsl(250, 85%, 65%);
+  --primary-hover: hsl(250, 85%, 55%);
+  --secondary: hsl(280, 80%, 60%);
+  --accent: hsl(180, 100%, 50%);
+  
+  --bg-deep: hsl(230, 25%, 8%);
+  --bg-main: hsl(230, 25%, 12%);
+  --bg-card: hsla(230, 25%, 18%, 0.7);
+  
+  --text-main: hsl(210, 20%, 95%);
+  --text-dim: hsl(210, 15%, 70%);
+  --text-muted: hsl(210, 10%, 50%);
+  
+  --success: hsl(150, 80%, 50%);
+  --warning: hsl(45, 100%, 60%);
+  --danger: hsl(0, 85%, 60%);
+  --info: hsl(200, 90%, 60%);
+
+  /* Spacing */
+  --space-xs: 0.25rem;
+  --space-sm: 0.5rem;
+  --space-md: 1rem;
+  --space-lg: 1.5rem;
+  --space-xl: 2.5rem;
+
+  /* Glassmorphism */
+  --glass-bg: rgba(255, 255, 255, 0.05);
+  --glass-border: rgba(255, 255, 255, 0.1);
+  --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+  --blur: blur(12px);
+
+  /* Transitions */
+  --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  
+  /* Borders */
+  --radius-sm: 6px;
+  --radius-md: 12px;
+  --radius-lg: 20px;
+  --radius-full: 9999px;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: 'Outfit', system-ui, -apple-system, sans-serif;
+  background-color: var(--bg-deep);
+  color: var(--text-main);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+button {
+  cursor: pointer;
+  border: none;
+  background: none;
+  font-family: inherit;
+  transition: var(--transition);
+}
+
+a {
+  text-decoration: none;
+  color: inherit;
+}

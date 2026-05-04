@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Aubm</string>
+    <string name="title_activity_main">Aubm</string>
+    <string name="package_name">com.aubm.app</string>
+    <string name="custom_url_scheme">com.aubm.app</string>
+</resources>
