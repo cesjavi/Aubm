@@ -2,6 +2,8 @@
 title: Aubm
 sdk: docker
 app_port: 7860
+license: mit
+short_description: Automated Business Machines
 ---
 
 # 🤖 Aubm
