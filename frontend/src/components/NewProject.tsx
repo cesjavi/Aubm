@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { CheckCircle2, FileText, PlusCircle } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { supabase } from '../services/supabase';
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../context/useAuth';
 
 const NewProject: React.FC<{ onCreated?: () => void }> = ({ onCreated }) => {
   const { user } = useAuth();

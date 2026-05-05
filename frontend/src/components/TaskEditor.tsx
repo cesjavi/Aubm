@@ -8,8 +8,14 @@ interface TaskEditorProps {
   onClose: () => void;
 }
 
+interface EditableTask {
+  id: string;
+  title: string;
+  output_data: unknown;
+}
+
 const TaskEditor: React.FC<TaskEditorProps> = ({ taskId, onClose }) => {
-  const [task, setTask] = useState<any>(null);
+  const [task, setTask] = useState<EditableTask | null>(null);
   const [editedOutput, setEditedOutput] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -17,7 +23,7 @@ const TaskEditor: React.FC<TaskEditorProps> = ({ taskId, onClose }) => {
     const fetchTask = async () => {
       const { data } = await supabase
         .from('tasks')
-        .select('*')
+        .select('id,title,output_data')
         .eq('id', taskId)
         .single();
       
@@ -38,7 +44,7 @@ const TaskEditor: React.FC<TaskEditorProps> = ({ taskId, onClose }) => {
         .update({ output_data: parsed })
         .eq('id', taskId);
       alert('Task updated successfully!');
-    } catch (e) {
+    } catch {
       alert('Invalid JSON format');
     }
     setSaving(false);

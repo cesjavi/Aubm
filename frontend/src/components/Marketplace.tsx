@@ -3,8 +3,20 @@ import { supabase } from '../services/supabase';
 import { Star, Download, Search } from 'lucide-react';
 import { motion } from 'framer-motion';
 
+interface AgentTemplate {
+  id: string;
+  name: string;
+  role: string;
+  model: string;
+  api_provider: string;
+  system_prompt: string;
+  category: string;
+  description: string;
+  is_featured: boolean;
+}
+
 const Marketplace: React.FC = () => {
-  const [templates, setTemplates] = useState<any[]>([]);
+  const [templates, setTemplates] = useState<AgentTemplate[]>([]);
   const [search, setSearch] = useState('');
 
   useEffect(() => {
@@ -15,7 +27,7 @@ const Marketplace: React.FC = () => {
     fetchTemplates();
   }, []);
 
-  const handleDeploy = async (template: any) => {
+  const handleDeploy = async (template: AgentTemplate) => {
     const { data: userData } = await supabase.auth.getUser();
     if (!userData.user) {
       alert('Please log in to deploy agents.');

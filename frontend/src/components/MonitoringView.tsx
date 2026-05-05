@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Activity, AlertTriangle, Database, RefreshCw, Server, ShieldCheck } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { supabase } from '../services/supabase';
+import { getApiUrl } from '../services/runtimeConfig';
 
 interface MonitoringSummary {
   status: string;
@@ -29,7 +30,7 @@ const MonitoringView: React.FC = () => {
   const [summary, setSummary] = useState<MonitoringSummary>(emptySummary);
   const [loading, setLoading] = useState(false);
 
-  const fetchFallbackSummary = async (): Promise<MonitoringSummary> => {
+  const fetchFallbackSummary = useCallback(async (): Promise<MonitoringSummary> => {
     const [projects, tasks, agents, runs, failed, reviews] = await Promise.all([
       supabase.from('projects').select('id', { count: 'exact', head: true }),
       supabase.from('tasks').select('id', { count: 'exact', head: true }),
@@ -53,14 +54,13 @@ const MonitoringView: React.FC = () => {
       timestamp: new Date().toISOString(),
       error: 'Backend monitoring endpoint unavailable; using Supabase fallback.'
     };
-  };
+  }, []);
 
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
     setLoading(true);
-    const apiUrl = import.meta.env.VITE_API_URL;
+    const apiUrl = getApiUrl();
 
     try {
-      if (!apiUrl) throw new Error('VITE_API_URL is not configured');
       const response = await fetch(`${apiUrl}/monitoring/summary`);
       if (!response.ok) throw new Error(`Backend returned ${response.status}`);
       setSummary(await response.json());
@@ -69,11 +69,11 @@ const MonitoringView: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [fetchFallbackSummary]);
 
   useEffect(() => {
     refresh();
-  }, []);
+  }, [refresh]);
 
   const degraded = summary.status !== 'ok' || Object.values(summary.checks).some((check) => check === 'error');
 

@@ -2,10 +2,22 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../services/supabase';
 import { MessageSquare, Play, CheckCircle2, AlertCircle } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { getApiUrl } from '../services/runtimeConfig';
+
+interface DebateAgent {
+  id: string;
+  name: string;
+  model: string;
+}
+
+interface DebateTask {
+  id: string;
+  title: string;
+}
 
 const DebateView: React.FC = () => {
-  const [agents, setAgents] = useState<any[]>([]);
-  const [tasks, setTasks] = useState<any[]>([]);
+  const [agents, setAgents] = useState<DebateAgent[]>([]);
+  const [tasks, setTasks] = useState<DebateTask[]>([]);
   const [selectedTask, setSelectedTask] = useState('');
   const [agentA, setAgentA] = useState('');
   const [agentB, setAgentB] = useState('');
@@ -14,8 +26,8 @@ const DebateView: React.FC = () => {
 
   useEffect(() => {
     const fetchData = async () => {
-      const { data: agentsData } = await supabase.from('agents').select('*');
-      const { data: tasksData } = await supabase.from('tasks').select('*').eq('status', 'todo');
+      const { data: agentsData } = await supabase.from('agents').select('id,name,model');
+      const { data: tasksData } = await supabase.from('tasks').select('id,title').eq('status', 'todo');
       if (agentsData) setAgents(agentsData);
       if (tasksData) setTasks(tasksData);
     };
@@ -36,7 +48,7 @@ const DebateView: React.FC = () => {
     setStatus('Initializing debate flow...');
     
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_URL}/orchestrator/debate`, {
+      const response = await fetch(`${getApiUrl()}/orchestrator/debate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -51,7 +63,7 @@ const DebateView: React.FC = () => {
       } else {
         setStatus('Failed to start debate.');
       }
-    } catch (e) {
+    } catch {
       setStatus('Error connecting to backend.');
     }
     setLoading(false);

@@ -1,9 +1,10 @@
 import React, { useMemo, useState } from 'react';
 import { Bot, CheckCircle2, KeyRound, LogOut, Server, Settings, Shield, UserCircle } from 'lucide-react';
 import { motion } from 'framer-motion';
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../context/useAuth';
 import { getDefaultModel, getDefaultProvider, providerOptions, saveProviderDefaults } from '../services/llmConfig';
 import type { SupportedProvider } from '../services/llmConfig';
+import { getApiUrl, getSupabaseUrl } from '../services/runtimeConfig';
 
 const SettingsView: React.FC = () => {
   const { user, session, signOut } = useAuth();
@@ -13,8 +14,8 @@ const SettingsView: React.FC = () => {
   const [saved, setSaved] = useState(false);
 
   const config = useMemo(() => {
-    const apiUrl = import.meta.env.VITE_API_URL || 'Not configured';
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'Not configured';
+    const apiUrl = getApiUrl() || 'Same origin';
+    const supabaseUrl = getSupabaseUrl() || 'Not configured';
     return { apiUrl, supabaseUrl };
   }, []);
 

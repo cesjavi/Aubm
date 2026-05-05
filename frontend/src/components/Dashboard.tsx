@@ -1,8 +1,8 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { FolderOpen, Play, RefreshCw } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { supabase } from '../services/supabase';
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../context/useAuth';
 
 interface Project {
   id: string;
@@ -30,7 +30,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNewProject, onOpenProject }) =>
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const loadDashboard = async () => {
+  const loadDashboard = useCallback(async () => {
     if (!user) return;
     setLoading(true);
     setError(null);
@@ -66,11 +66,11 @@ const Dashboard: React.FC<DashboardProps> = ({ onNewProject, onOpenProject }) =>
     setProjects(projectData ?? []);
     setTasks(taskData);
     setLoading(false);
-  };
+  }, [user]);
 
   useEffect(() => {
     loadDashboard();
-  }, [user?.id]);
+  }, [loadDashboard]);
 
   const taskCounts = useMemo(() => {
     return tasks.reduce<Record<string, { done: number; total: number }>>((acc, task) => {

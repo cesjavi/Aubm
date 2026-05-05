@@ -15,7 +15,7 @@ import {
   Activity
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useAuth } from './context/AuthContext';
+import { useAuth } from './context/useAuth';
 import Login from './components/Login';
 import DebateView from './components/DebateView';
 import Marketplace from './components/Marketplace';

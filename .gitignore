@@ -2,3 +2,8 @@ backend/.env
 /backend/venv
 /backend/__pycache__
 /backend/venv
+frontend/.env
+__pycache__/
+*.pyc
+
+.vercel

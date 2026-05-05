@@ -5,10 +5,12 @@ import App from './App.tsx'
 
 import { AuthProvider } from './context/AuthContext.tsx'
 import * as Sentry from "@sentry/react";
+import { getSentryDsn } from './services/runtimeConfig.ts';
 
-if (import.meta.env.VITE_SENTRY_DSN) {
+const sentryDsn = getSentryDsn();
+if (sentryDsn) {
   Sentry.init({
-    dsn: import.meta.env.VITE_SENTRY_DSN,
+    dsn: sentryDsn,
     integrations: [
       Sentry.browserTracingIntegration(),
       Sentry.replayIntegration(),

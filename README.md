@@ -1,3 +1,9 @@
+---
+title: Aubm
+sdk: docker
+app_port: 7860
+---
+
 # 🤖 Aubm
 
 ### Enterprise-Grade AI Agent Orchestration & Collaboration Platform
@@ -101,6 +107,27 @@ npm run dev
   cd backend
   python worker.py
   ```
+
+---
+
+## Hugging Face Spaces
+
+This repository is ready to deploy as a Docker Space. Create a Hugging Face Space with SDK `Docker`, then push this repo to the Space remote.
+
+Configure these Space secrets or variables:
+
+```env
+SUPABASE_URL=your_project_url
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
+SUPABASE_ANON_KEY=your_anon_key
+GROQ_API_KEY=optional_key
+OPENAI_API_KEY=optional_key
+GEMINI_API_KEY=optional_key
+AMD_API_KEY=optional_key
+TASK_QUEUE_EMBEDDED_WORKER=true
+```
+
+`VITE_API_URL` can stay empty on Spaces because the frontend calls the FastAPI backend on the same origin.
 
 ---
 

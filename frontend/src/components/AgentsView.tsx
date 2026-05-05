@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Bot, CheckCircle2, PlusCircle, RefreshCw } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { supabase } from '../services/supabase';
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../context/useAuth';
 import { getDefaultModel, getDefaultProvider, providerOptions } from '../services/llmConfig';
 import type { SupportedProvider } from '../services/llmConfig';
 
