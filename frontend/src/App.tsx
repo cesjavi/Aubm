@@ -92,16 +92,22 @@ const App: React.FC = () => {
             exit={{ x: -280 }}
             className="glass-panel app-sidebar"
             style={{ 
-              width: '280px', 
-              margin: 'var(--space-md)', 
               display: 'flex', 
-              flexDirection: 'column',
-              zIndex: 100
+              flexDirection: 'column'
             }}
           >
             <div className="sidebar-brand">
-              <Bot size={32} color="var(--accent)" />
-              <h1 style={{ fontSize: '1.5rem', margin: 0 }}>Aubm</h1>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
+                <Bot size={32} color="var(--accent)" />
+                <h1 style={{ fontSize: '1.5rem', margin: 0 }}>Aubm</h1>
+              </div>
+              <button 
+                className="mobile-only sidebar-close" 
+                onClick={() => setIsSidebarOpen(false)}
+                style={{ color: 'var(--text-dim)', padding: '4px' }}
+              >
+                <X size={24} />
+              </button>
             </div>
 
             <nav className="sidebar-nav">

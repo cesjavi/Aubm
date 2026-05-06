@@ -106,7 +106,7 @@
   gap: var(--space-lg);
 }
 
-.app-header {
+.app-header { position: sticky; top: 0; background: var(--bg-deep); z-index: 80; border-bottom: 1px solid var(--glass-border); backdrop-filter: blur(8px);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -956,8 +956,8 @@ select option {
 
   .app-sidebar {
     position: fixed;
-    inset: var(--space-sm) auto var(--space-sm) var(--space-sm);
-    width: min(280px, calc(100vw - 2rem)) !important;
+    inset: 0 auto 0 0;
+    width: 280px !important; max-width: 85vw; height: 100dvh; border-radius: 0;
     max-height: calc(100dvh - 1rem);
     overflow-y: auto;
     margin: 0 !important;
@@ -1034,7 +1034,7 @@ select option {
     gap: var(--space-md);
   }
 
-  .app-header {
+  .app-header { position: sticky; top: 0; background: var(--bg-deep); z-index: 80; border-bottom: 1px solid var(--glass-border); backdrop-filter: blur(8px);
     padding: var(--space-sm);
   }
 
@@ -1293,4 +1293,42 @@ select option {
 .btn-sm {
   padding: 6px 12px;
   font-size: 0.8rem;
+}
+
+.mobile-only {
+  display: none !important;
+}
+
+@media (max-width: 900px) {
+  .mobile-only {
+    display: flex !important;
+  }
+}
+
+.sidebar-close {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-xs);
+  transition: var(--transition);
+}
+
+.sidebar-close:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+@media (max-width: 640px) {
+  .app-console {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    margin: 0;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    z-index: 900;
+  }
+  
+  .app-console > div:last-child {
+    height: 80px !important;
+  }
 }
