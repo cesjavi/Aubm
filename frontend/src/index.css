@@ -952,6 +952,8 @@ select option {
 @media (max-width: 900px) {
   .app-container {
     display: block;
+    height: auto;
+    overflow: visible;
   }
 
   .app-sidebar {
@@ -976,6 +978,7 @@ select option {
   .app-main {
     min-height: 100dvh;
     padding: var(--space-md);
+    overflow: visible;
   }
 
   .marketplace-header {
