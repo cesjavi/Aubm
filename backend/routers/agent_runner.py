@@ -6,6 +6,19 @@ import logging
 router = APIRouter()
 logger = logging.getLogger("uvicorn")
 
+
+def _assert_task_quality(task: dict):
+    output_data = task.get("output_data") or {}
+    if not isinstance(output_data, dict):
+        return
+    quality_review = output_data.get("quality_review")
+    if not quality_review:
+        return
+    if quality_review.get("approved"):
+        return
+    reasons = quality_review.get("fail_reasons") or ["Task output failed quality validation."]
+    raise HTTPException(status_code=400, detail=f"Task output failed quality review: {'; '.join(reasons)}")
+
 def update_task_status(task_id: str, status: str):
     result = (
         supabase.table("tasks")
@@ -68,6 +81,10 @@ async def run_task(task_id: str, background_tasks: BackgroundTasks):
 
 @router.post("/{task_id}/approve")
 async def approve_task(task_id: str):
+    task_res = supabase.table("tasks").select("*").eq("id", task_id).single().execute()
+    if not task_res.data:
+        raise HTTPException(status_code=404, detail="Task not found")
+    _assert_task_quality(task_res.data)
     task = update_task_status(task_id, "done")
     return {"message": "Task approved", "task": task}
 
@@ -80,14 +97,35 @@ async def approve_all_tasks(project_id: str):
     """
     Approves all tasks in a project that are awaiting approval.
     """
-    # 1. Update tasks
-    result = (
+    waiting_tasks = (
         supabase.table("tasks")
-        .update({"status": "done"})
+        .select("*")
         .eq("project_id", project_id)
         .eq("status", "awaiting_approval")
         .execute()
+        .data
+        or []
     )
+    blocked = []
+    approvable_ids = []
+    for task in waiting_tasks:
+        try:
+            _assert_task_quality(task)
+            approvable_ids.append(task["id"])
+        except HTTPException:
+            blocked.append(task["title"])
+
+    # 1. Update tasks
+    result_data = []
+    if approvable_ids:
+        result = (
+            supabase.table("tasks")
+            .update({"status": "done"})
+            .eq("project_id", project_id)
+            .in_("id", approvable_ids)
+            .execute()
+        )
+        result_data = result.data or []
     
     # 2. Check if all tasks in project are now done
     task_result = (
@@ -100,4 +138,8 @@ async def approve_all_tasks(project_id: str):
     if tasks and all(task.get("status") == "done" for task in tasks):
         supabase.table("projects").update({"status": "completed"}).eq("id", project_id).execute()
     
-    return {"message": f"Approved {len(result.data)} tasks", "count": len(result.data)}
+    return {
+        "message": f"Approved {len(result_data)} tasks",
+        "count": len(result_data),
+        "blocked": blocked
+    }

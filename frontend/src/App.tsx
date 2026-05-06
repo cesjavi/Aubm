@@ -29,13 +29,18 @@ import AgentsView from './components/AgentsView';
 import AgentConsole from './components/AgentConsole';
 import SplashScreen from './components/SplashScreen';
 import { useEffect } from 'react';
+import { getUiMode, saveUiMode } from './services/uiMode';
+import type { UiMode } from './services/uiMode';
 
 type AppTab = 'dashboard' | 'project-detail' | 'agents' | 'marketplace' | 'debate' | 'voice' | 'spatial' | 'monitoring' | 'new-project' | 'settings';
 
 const App: React.FC = () => {
-  const { session, loading, signOut } = useAuth();
+  const { session, loading, signOut, profile, user } = useAuth();
   const [activeTab, setActiveTab] = useState<AppTab>('dashboard');
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [initialTaskId, setInitialTaskId] = useState<string | null>(null);
+  const [projectDetailReturnTab, setProjectDetailReturnTab] = useState<AppTab>('dashboard');
+  const [uiMode, setUiMode] = useState<UiMode>(() => getUiMode());
   const [isSidebarOpen, setIsSidebarOpen] = useState(() => typeof window === 'undefined' || window.innerWidth >= 900);
   const [showSplash, setShowSplash] = useState(true);
 
@@ -44,11 +49,30 @@ const App: React.FC = () => {
     return () => clearTimeout(timer);
   }, []);
 
+  useEffect(() => {
+    if (uiMode === 'expert') return;
+    if (['agents', 'marketplace', 'debate', 'voice', 'spatial', 'monitoring'].includes(activeTab)) {
+      setActiveTab('dashboard');
+    }
+  }, [activeTab, uiMode]);
+
   const navigateTo = (tab: AppTab) => {
     setActiveTab(tab);
     if (typeof window !== 'undefined' && window.innerWidth < 900) {
       setIsSidebarOpen(false);
     }
+  };
+
+  const openProjectDetail = (projectId: string, options?: { taskId?: string | null; returnTab?: AppTab }) => {
+    setSelectedProjectId(projectId);
+    setInitialTaskId(options?.taskId ?? null);
+    setProjectDetailReturnTab(options?.returnTab ?? 'dashboard');
+    navigateTo('project-detail');
+  };
+
+  const updateUiMode = (mode: UiMode) => {
+    setUiMode(mode);
+    saveUiMode(mode);
   };
 
   if (loading || showSplash) return <AnimatePresence><SplashScreen /></AnimatePresence>;
@@ -86,47 +110,51 @@ const App: React.FC = () => {
                 onClick={() => navigateTo('dashboard')} 
               />
               <SidebarItem 
-                icon={<ShoppingBag size={20} />} 
-                label="Marketplace" 
-                active={activeTab === 'marketplace'} 
-                onClick={() => navigateTo('marketplace')} 
-              />
-              <SidebarItem
-                icon={<Bot size={20} />}
-                label="Agents"
-                active={activeTab === 'agents'}
-                onClick={() => navigateTo('agents')}
-              />
-              <SidebarItem 
-                icon={<MessageSquare size={20} />} 
-                label="Agent Debate" 
-                active={activeTab === 'debate'} 
-                onClick={() => navigateTo('debate')} 
-              />
-              <SidebarItem
-                icon={<Volume2 size={20} />}
-                label="Voice Control"
-                active={activeTab === 'voice'}
-                onClick={() => navigateTo('voice')}
-              />
-              <SidebarItem
-                icon={<Box size={20} />}
-                label="Spatial View"
-                active={activeTab === 'spatial'}
-                onClick={() => navigateTo('spatial')}
-              />
-              <SidebarItem
-                icon={<Activity size={20} />}
-                label="Monitoring"
-                active={activeTab === 'monitoring'}
-                onClick={() => navigateTo('monitoring')}
-              />
-              <SidebarItem 
                 icon={<PlusCircle size={20} />} 
                 label="New Project" 
                 active={activeTab === 'new-project'} 
                 onClick={() => navigateTo('new-project')} 
               />
+              {uiMode === 'expert' && (
+                <>
+                  <SidebarItem 
+                    icon={<ShoppingBag size={20} />} 
+                    label="Marketplace" 
+                    active={activeTab === 'marketplace'} 
+                    onClick={() => navigateTo('marketplace')} 
+                  />
+                  <SidebarItem
+                    icon={<Bot size={20} />}
+                    label="Agents"
+                    active={activeTab === 'agents'}
+                    onClick={() => navigateTo('agents')}
+                  />
+                  <SidebarItem 
+                    icon={<MessageSquare size={20} />} 
+                    label="Agent Debate" 
+                    active={activeTab === 'debate'} 
+                    onClick={() => navigateTo('debate')} 
+                  />
+                  <SidebarItem
+                    icon={<Volume2 size={20} />}
+                    label="Voice Control"
+                    active={activeTab === 'voice'}
+                    onClick={() => navigateTo('voice')}
+                  />
+                  <SidebarItem
+                    icon={<Box size={20} />}
+                    label="Spatial View"
+                    active={activeTab === 'spatial'}
+                    onClick={() => navigateTo('spatial')}
+                  />
+                  <SidebarItem
+                    icon={<Activity size={20} />}
+                    label="Monitoring"
+                    active={activeTab === 'monitoring'}
+                    onClick={() => navigateTo('monitoring')}
+                  />
+                </>
+              )}
               <SidebarItem 
                 icon={<Settings size={20} />} 
                 label="Settings" 
@@ -143,11 +171,11 @@ const App: React.FC = () => {
             <div className="sidebar-user">
               <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
                 <div style={{ width: 40, height: 40, borderRadius: '50%', background: 'var(--primary)', display: 'flex', alignItems: 'center', justifySelf: 'center', justifyContent: 'center' }}>
-                  JD
+                  {(profile?.full_name || user?.email || 'U').slice(0, 2).toUpperCase()}
                 </div>
                 <div>
-                  <div style={{ fontWeight: 600 }}>John Doe</div>
-                  <div style={{ fontSize: '0.8rem', color: 'var(--text-dim)' }}>Administrator</div>
+                  <div style={{ fontWeight: 600 }}>{profile?.full_name || user?.email || 'User'}</div>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-dim)' }}>{profile?.role || 'user'}</div>
                 </div>
               </div>
             </div>
@@ -167,6 +195,9 @@ const App: React.FC = () => {
               <span style={{ color: 'var(--success)' }}>●</span>
               <span>API Online</span>
             </div>
+            <div className="glass-panel api-status">
+              <span>{uiMode === 'guided' ? 'Guided Mode' : 'Expert Mode'}</span>
+            </div>
           </div>
         </header>
 
@@ -174,24 +205,35 @@ const App: React.FC = () => {
           {activeTab === 'dashboard' && (
             <Dashboard
               onNewProject={() => navigateTo('new-project')}
-              onOpenProject={(projectId) => {
-                setSelectedProjectId(projectId);
-                navigateTo('project-detail');
-              }}
+              onOpenProject={(projectId) => openProjectDetail(projectId)}
             />
           )}
           {activeTab === 'project-detail' && selectedProjectId && (
-            <ProjectDetail projectId={selectedProjectId} onBack={() => navigateTo('dashboard')} />
+            <ProjectDetail
+              projectId={selectedProjectId}
+              uiMode={uiMode}
+              initialTaskId={initialTaskId}
+              onBack={() => {
+                setInitialTaskId(null);
+                navigateTo(projectDetailReturnTab);
+              }}
+            />
           )}
 
-          {activeTab === 'debate' && <DebateView />}
-          {activeTab === 'agents' && <AgentsView />}
-          {activeTab === 'marketplace' && <Marketplace />}
-          {activeTab === 'voice' && <VoiceControl onNavigate={navigateTo} />}
-          {activeTab === 'spatial' && <SpatialDashboard />}
-          {activeTab === 'monitoring' && <MonitoringView />}
-          {activeTab === 'new-project' && <NewProject onCreated={() => navigateTo('dashboard')} />}
-          {activeTab === 'settings' && <SettingsView />}
+          {activeTab === 'debate' && uiMode === 'expert' && <DebateView />}
+          {activeTab === 'agents' && uiMode === 'expert' && <AgentsView />}
+          {activeTab === 'marketplace' && uiMode === 'expert' && <Marketplace />}
+          {activeTab === 'voice' && uiMode === 'expert' && <VoiceControl onNavigate={navigateTo} />}
+          {activeTab === 'spatial' && uiMode === 'expert' && (
+            <SpatialDashboard
+              selectedProjectId={selectedProjectId}
+              onSelectProject={(projectId) => setSelectedProjectId(projectId)}
+              onOpenTask={(projectId, taskId) => openProjectDetail(projectId, { taskId, returnTab: 'spatial' })}
+            />
+          )}
+          {activeTab === 'monitoring' && uiMode === 'expert' && <MonitoringView />}
+          {activeTab === 'new-project' && <NewProject uiMode={uiMode} onCreated={() => navigateTo('dashboard')} />}
+          {activeTab === 'settings' && <SettingsView uiMode={uiMode} onUiModeChange={updateUiMode} />}
         </section>
 
         {/* Real-time Agent Console */}

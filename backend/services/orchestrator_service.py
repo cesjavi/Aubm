@@ -4,6 +4,7 @@ import json
 import logging
 from services.config import settings
 from services.agent_runner_service import AgentRunnerService
+from services.output_quality import clean_report_text, dedupe_lines, filter_report_sections, report_text_from_output
 
 logger = logging.getLogger("uvicorn")
 
@@ -63,9 +64,9 @@ def _format_output_for_report(output_data) -> str:
         primary = output_data
 
     if isinstance(primary, str):
-        return primary
+        return clean_report_text(dedupe_lines(primary))
 
-    return "\n".join(_format_value_for_report(primary))
+    return clean_report_text(dedupe_lines("\n".join(_format_value_for_report(primary))))
 
 def _output_text(output_data) -> str:
     return _format_output_for_report(output_data).lower()
@@ -137,7 +138,7 @@ REPORT_VARIANTS = {
         "prompt": (
             "Create a concise executive brief from the approved project work. "
             "Use plain English, no JSON, no code blocks. Include: objective, main findings, recommended next steps, and key risks. "
-            "Keep it short and decision-oriented."
+            "Keep it short and decision-oriented. Do not invent entities, metrics, or placeholders."
         )
     },
     "pessimistic": {
@@ -147,7 +148,7 @@ REPORT_VARIANTS = {
         "prompt": (
             "Create a skeptical, downside-focused analysis from the approved project work. "
             "Use plain English, no JSON, no code blocks. Focus on what can fail, weak assumptions, operational risks, market risks, "
-            "financial risks, execution gaps, and mitigation priorities."
+            "financial risks, execution gaps, and mitigation priorities. Do not invent entities, metrics, or placeholders."
         )
     }
 }
@@ -416,6 +417,27 @@ class OrchestratorService:
 
         return None
 
+    def _quality_approved_tasks(self, tasks: list[dict]) -> tuple[list[dict], list[dict]]:
+        approved: list[dict] = []
+        excluded: list[dict] = []
+        for task in tasks:
+            output_data = task.get("output_data") or {}
+            quality_review = output_data.get("quality_review") if isinstance(output_data, dict) else None
+            if quality_review and not quality_review.get("approved", False):
+                excluded.append({
+                    "title": task.get("title", "Untitled task"),
+                    "reasons": quality_review.get("fail_reasons") or ["Failed quality review."]
+                })
+                continue
+            approved.append(task)
+        return approved, excluded
+
+    def _curate_task_output(self, output_data) -> tuple[str, list[str]]:
+        text = report_text_from_output(output_data)
+        text = clean_report_text(dedupe_lines(text))
+        text, excluded_lines = filter_report_sections(text)
+        return text or "No approved output was saved for this task.", excluded_lines
+
     async def build_final_report(self, project_id: str, variant: str = "full"):
         variant = variant if variant in REPORT_VARIANTS else "full"
         project = supabase.table("projects").select("*").eq("id", project_id).single().execute().data
@@ -440,6 +462,10 @@ class OrchestratorService:
         if incomplete:
             raise ValueError(f"Final report is available after all tasks are approved. Pending tasks: {len(incomplete)}")
 
+        curated_tasks, excluded_tasks = self._quality_approved_tasks(tasks)
+        if not curated_tasks:
+            raise ValueError("No approved task outputs passed quality validation for final reporting.")
+
         # 0. Header and Description
         report_title = REPORT_VARIANTS[variant]["title"]
         lines = [
@@ -460,14 +486,26 @@ class OrchestratorService:
         # but for the text report, we include the approved work summary.
         lines.extend(["## Approved Work Summary", ""])
 
-        for index, task in enumerate(tasks, start=1):
+        report_exclusions: list[str] = []
+        for index, task in enumerate(curated_tasks, start=1):
+            curated_text, excluded_lines = self._curate_task_output(task.get("output_data"))
+            report_exclusions.extend(excluded_lines)
             lines.extend([
                 f"### {index}. {task['title']}",
                 task.get("description") or "No task description provided.",
                 "",
-                _format_output_for_report(task.get("output_data")),
+                curated_text,
                 ""
             ])
+
+        if excluded_tasks or report_exclusions:
+            lines.extend(["## Excluded Content", ""])
+            for excluded in excluded_tasks:
+                lines.append(f"- Excluded task output: {excluded['title']} ({'; '.join(excluded['reasons'])})")
+            for excluded_line in report_exclusions[:25]:
+                if excluded_line:
+                    lines.append(f"- Removed low-quality line: {excluded_line}")
+            lines.append("")
 
         # Final Conclusion Generation
         conclusion = (
@@ -486,7 +524,7 @@ class OrchestratorService:
                         name=agent_data["name"],
                         role=agent_data["role"],
                         model=agent_data["model"],
-                        system_prompt="You write a 2-3 sentence strategic conclusion and 3 actionable next steps for a project report."
+                        system_prompt="You write a 2-3 sentence strategic conclusion and 3 actionable next steps for a project report. Never introduce placeholders or unsupported facts."
                     )
                     report_so_far = "\n".join(lines)
                     res = await agent.run(f"Based on this project report, write a final strategic conclusion and 3 next steps:\n\n{report_so_far}", [])
@@ -504,7 +542,7 @@ class OrchestratorService:
             conclusion,
             "",
             "## Completion Status",
-            f"All {len(tasks)} tasks are approved. Project status: completed."
+            f"All {len(tasks)} tasks are approved. {len(curated_tasks)} task outputs passed final quality validation. Project status: completed."
         ])
 
         supabase.table("projects").update({"status": "completed"}).eq("id", project_id).execute()
@@ -521,10 +559,10 @@ class OrchestratorService:
         return {
             "project_id": project_id,
             "project_name": project["name"],
-            "task_count": len(tasks),
+            "task_count": len(curated_tasks),
             "variant": variant,
-            "report": report,
-            "charts": _build_report_charts(tasks)
+            "report": clean_report_text(dedupe_lines(report)),
+            "charts": _build_report_charts(curated_tasks)
         }
 
     async def decompose_project(self, project_id: str):
@@ -588,6 +626,7 @@ Do not include any conversational text, markdown formatting outside of the JSON,
 ]
 
 IMPORTANT: Return a flat array. Do not wrap it in a parent 'tasks' object.
+Do not use placeholder names or generic filler tasks. Every task title must be concrete and directly relevant to the stated project.
 """
 
         try:

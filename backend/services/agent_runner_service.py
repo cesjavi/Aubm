@@ -4,6 +4,7 @@ from services.supabase_service import supabase
 from services.audit_service import audit_service
 from agents.agent_factory import AgentFactory
 from services.semantic_backprop import semantic_backprop
+from services.output_quality import build_quality_instructions, validate_output
 
 logger = logging.getLogger("agent_runner_service")
 
@@ -97,7 +98,9 @@ class AgentRunnerService:
 
             # 4. Execute Run with timing
             start_time = time.time()
-            result = await agent.run(task.get("description") or task["title"], context, extra_context=extra_context)
+            task_instructions = task.get("description") or task["title"]
+            task_instructions = f"{task_instructions}\n\n{build_quality_instructions(task)}"
+            result = await agent.run(task_instructions, context, extra_context=extra_context)
             duration = time.time() - start_time
 
             if result.get("status") == "error":
@@ -111,6 +114,9 @@ class AgentRunnerService:
                     logger.warning(f"SECURITY: Suspicious pattern '{pattern}' detected in agent output for task {task_id}.")
                     result["security_warning"] = f"Output sanitized: suspicious pattern '{pattern}' detected."
                     # We don't block yet, but we flag it.
+
+            quality_review = validate_output(task, result)
+            result["quality_review"] = quality_review
 
             # 6. Save to Cache
             AgentRunnerService._task_cache[cache_key] = result
@@ -135,6 +141,14 @@ class AgentRunnerService:
                 "action": complete_action,
                 "content": f"{complete_content} (Execution time: {duration:.2f}s)"
             }).execute()
+
+            if not quality_review["approved"]:
+                supabase.table("agent_logs").insert({
+                    "task_id": task_id,
+                    "run_id": run_id,
+                    "action": "quality_review_failed",
+                    "content": f"Quality review failed: {', '.join(quality_review['fail_reasons'])}"
+                }).execute()
 
             return result, run_id
 

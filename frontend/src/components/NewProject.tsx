@@ -3,6 +3,7 @@ import { CheckCircle2, FileText, Link2, Paperclip, PlusCircle, StickyNote, Trash
 import { motion } from 'framer-motion';
 import { supabase } from '../services/supabase';
 import { useAuth } from '../context/useAuth';
+import type { UiMode } from '../services/uiMode';
 
 type ProjectSource =
   | {
@@ -79,7 +80,7 @@ const buildContextPayload = (baseContext: string, sources: ProjectSource[]) => {
   return sections.join('\n\n').trim();
 };
 
-const NewProject: React.FC<{ onCreated?: () => void }> = ({ onCreated }) => {
+const NewProject: React.FC<{ uiMode: UiMode; onCreated?: () => void }> = ({ uiMode, onCreated }) => {
   const { user } = useAuth();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [name, setName] = useState('');
@@ -91,6 +92,7 @@ const NewProject: React.FC<{ onCreated?: () => void }> = ({ onCreated }) => {
   const [noteContent, setNoteContent] = useState('');
   const [sources, setSources] = useState<ProjectSource[]>([]);
   const [isPublic, setIsPublic] = useState(false);
+  const [showAdvancedSources, setShowAdvancedSources] = useState(uiMode === 'expert');
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -218,11 +220,24 @@ const NewProject: React.FC<{ onCreated?: () => void }> = ({ onCreated }) => {
         <PlusCircle size={32} color="var(--accent)" />
         <div>
           <h2>Create Project</h2>
-          <p style={{ color: 'var(--text-dim)', fontSize: '0.9rem' }}>Start a workspace for agents, tasks, context, and reviews.</p>
+          <p style={{ color: 'var(--text-dim)', fontSize: '0.9rem' }}>
+            {uiMode === 'guided'
+              ? 'Describe the goal, add relevant context, and create the workspace.'
+              : 'Start a workspace for agents, tasks, context, and reviews.'}
+          </p>
         </div>
       </div>
 
       <form className="glass-panel project-form" onSubmit={handleSubmit}>
+        {uiMode === 'guided' && (
+          <div className="default-agent-panel">
+            <strong>Guided flow</strong>
+            <p style={{ color: 'var(--text-dim)' }}>
+              1. Name the project. 2. Describe the outcome. 3. Add context and sources. 4. Create the workspace and generate the plan from the project page.
+            </p>
+          </div>
+        )}
+
         <label>
           <span>Project Name</span>
           <input value={name} onChange={(event) => setName(event.target.value)} required placeholder="Customer onboarding automation" />
@@ -244,6 +259,20 @@ const NewProject: React.FC<{ onCreated?: () => void }> = ({ onCreated }) => {
             <h3>Project Sources</h3>
           </div>
 
+          {uiMode === 'guided' && !showAdvancedSources && (
+            <>
+              <p style={{ color: 'var(--text-dim)', fontSize: '0.9rem' }}>
+                Add the links, notes, or files that should shape the plan. Skip this if the description already contains enough context.
+              </p>
+              <button className="btn btn-glass" type="button" onClick={() => setShowAdvancedSources(true)}>
+                <Paperclip size={16} />
+                Add Sources
+              </button>
+            </>
+          )}
+
+          {(uiMode === 'expert' || showAdvancedSources) && (
+            <>
           <div className="responsive-two-col">
             <label>
               <span>Link Label</span>
@@ -288,6 +317,8 @@ const NewProject: React.FC<{ onCreated?: () => void }> = ({ onCreated }) => {
           <p style={{ color: 'var(--text-dim)', fontSize: '0.85rem', marginTop: '-0.25rem' }}>
             Text and markdown files are embedded into project context. PDF, Word, and Excel files are stored as named references in the context.
           </p>
+            </>
+          )}
 
           {sources.length > 0 && (
             <div className="task-list">
@@ -311,10 +342,12 @@ const NewProject: React.FC<{ onCreated?: () => void }> = ({ onCreated }) => {
           )}
         </div>
 
-        <label className="toggle-row">
-          <input type="checkbox" checked={isPublic} onChange={(event) => setIsPublic(event.target.checked)} />
-          <span>Make project visible to authenticated users</span>
-        </label>
+        {uiMode === 'expert' && (
+          <label className="toggle-row">
+            <input type="checkbox" checked={isPublic} onChange={(event) => setIsPublic(event.target.checked)} />
+            <span>Make project visible to authenticated users</span>
+          </label>
+        )}
 
         {message && (
           <div className="inline-status">

@@ -5,6 +5,7 @@ import { supabase } from '../services/supabase';
 import { useAuth } from '../context/useAuth';
 import { getDefaultModel, getDefaultProvider } from '../services/llmConfig';
 import { getApiUrl } from '../services/runtimeConfig';
+import type { UiMode } from '../services/uiMode';
 
 interface Project {
   id: string;
@@ -31,6 +32,11 @@ interface Task {
   output_data: unknown | null;
 }
 
+interface TaskDependency {
+  task_id: string;
+  depends_on_task_id: string;
+}
+
 interface ChartDatum {
   label: string;
   value: number;
@@ -45,6 +51,8 @@ interface ReportCharts {
 
 interface ProjectDetailProps {
   projectId: string;
+  uiMode: UiMode;
+  initialTaskId?: string | null;
   onBack: () => void;
 }
 
@@ -66,15 +74,19 @@ const ensureBackendOk = async (response: Response, fallback?: string) => {
   }
 };
 
-const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, onBack }) => {
+const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initialTaskId = null, onBack }) => {
   const { user } = useAuth();
   const [project, setProject] = useState<Project | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [dependencies, setDependencies] = useState<TaskDependency[]>([]);
+  const [dependencyTableAvailable, setDependencyTableAvailable] = useState(true);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [agentId, setAgentId] = useState('');
+  const [dependencyIds, setDependencyIds] = useState<string[]>([]);
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
+  const [showAdvancedTaskControls, setShowAdvancedTaskControls] = useState(uiMode === 'expert');
   const [saving, setSaving] = useState(false);
   const [orchestrating, setOrchestrating] = useState(false);
   const [approvingAll, setApprovingAll] = useState(false);
@@ -129,18 +141,44 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, onBack }) => {
     }
   ];
 
+  const dependencyMap = useCallback(
+    (taskId: string) => dependencies.filter((dependency) => dependency.task_id === taskId).map((dependency) => dependency.depends_on_task_id),
+    [dependencies]
+  );
+
+  const dependentMap = useCallback(
+    (taskId: string) => dependencies.filter((dependency) => dependency.depends_on_task_id === taskId).map((dependency) => dependency.task_id),
+    [dependencies]
+  );
+
   const loadProject = useCallback(async () => {
     setError(null);
     setMessage(null);
 
-    const [{ data: projectData, error: projectError }, { data: taskData, error: taskError }, { data: agentData }] = await Promise.all([
+    const [
+      { data: projectData, error: projectError },
+      { data: taskData, error: taskError },
+      { data: agentData },
+      dependencyResponse
+    ] = await Promise.all([
       supabase.from('projects').select('id,name,description,context,status').eq('id', projectId).single(),
       supabase.from('tasks').select('id,title,description,status,priority,assigned_agent_id,output_data').eq('project_id', projectId).order('created_at', { ascending: false }),
-      supabase.from('agents').select('id,name,role,model').order('created_at', { ascending: false })
+      supabase.from('agents').select('id,name,role,model').order('created_at', { ascending: false }),
+      supabase.from('task_dependencies').select('task_id,depends_on_task_id').eq('project_id', projectId)
     ]);
 
     if (projectError) setError(projectError.message);
     if (taskError) setError(taskError.message);
+    if (dependencyResponse.error) {
+      setDependencyTableAvailable(false);
+      setDependencies([]);
+      if (dependencyResponse.error.code !== '42P01') {
+        setError(dependencyResponse.error.message);
+      }
+    } else {
+      setDependencyTableAvailable(true);
+      setDependencies(dependencyResponse.data ?? []);
+    }
 
     setProject(projectData ?? null);
     setTasks(taskData ?? []);
@@ -156,6 +194,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, onBack }) => {
     setTitle('');
     setDescription('');
     setAgentId('');
+    setDependencyIds([]);
   };
 
   const startEditingTask = (task: Task) => {
@@ -163,8 +202,49 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, onBack }) => {
     setTitle(task.title);
     setDescription(task.description ?? '');
     setAgentId(task.assigned_agent_id ?? '');
+    setDependencyIds(dependencyMap(task.id));
     setError(null);
     setMessage(null);
+  };
+
+  useEffect(() => {
+    if (!initialTaskId || tasks.length === 0) return;
+    const task = tasks.find((item) => item.id === initialTaskId);
+    if (task) {
+      startEditingTask(task);
+      if (task.output_data) {
+        setSelectedTask(task);
+      }
+    }
+  }, [initialTaskId, tasks]);
+
+  const saveTaskDependencies = async (taskId: string, selectedDependencyIds: string[]) => {
+    if (!dependencyTableAvailable) return null;
+
+    const { error: deleteError } = await supabase
+      .from('task_dependencies')
+      .delete()
+      .eq('project_id', projectId)
+      .eq('task_id', taskId);
+
+    if (deleteError) {
+      return deleteError;
+    }
+
+    const uniqueIds = Array.from(new Set(selectedDependencyIds.filter((id) => id && id !== taskId)));
+    if (uniqueIds.length === 0) {
+      return null;
+    }
+
+    const { error: insertError } = await supabase.from('task_dependencies').insert(
+      uniqueIds.map((dependsOnTaskId) => ({
+        project_id: projectId,
+        task_id: taskId,
+        depends_on_task_id: dependsOnTaskId
+      }))
+    );
+
+    return insertError;
   };
 
   const createTask = async (event: React.FormEvent) => {
@@ -180,17 +260,27 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, onBack }) => {
     };
 
     const response = editingTaskId
-      ? await supabase.from('tasks').update(payload).eq('id', editingTaskId)
+      ? await supabase.from('tasks').update(payload).eq('id', editingTaskId).select('id').single()
       : await supabase.from('tasks').insert({
           project_id: projectId,
           ...payload,
           status: 'todo',
           priority: 0
-        });
+        }).select('id').single();
 
     if (response.error) {
       setError(response.error.message);
     } else {
+      const savedTaskId = editingTaskId ?? response.data?.id;
+      if (savedTaskId) {
+        const dependencyError = await saveTaskDependencies(savedTaskId, dependencyIds);
+        if (dependencyError) {
+          setError(dependencyError.message);
+          setSaving(false);
+          return;
+        }
+      }
+
       resetTaskForm();
       await loadProject();
       setMessage(editingTaskId ? 'Task updated.' : 'Task added.');
@@ -342,6 +432,9 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, onBack }) => {
 
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const allTasksApproved = tasks.length > 0 && tasks.every((task) => task.status === 'done');
+  const taskLookup = new Map(tasks.map((task) => [task.id, task]));
+  const tasksAwaitingApproval = tasks.filter((task) => task.status === 'awaiting_approval').length;
+  const completedTasks = tasks.filter((task) => task.status === 'done').length;
 
   const humanizeKey = (key: string) => key.replace(/[_-]/g, ' ').trim().replace(/\b\w/g, (char) => char.toUpperCase());
 
@@ -578,8 +671,61 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, onBack }) => {
       {error && <div className="inline-status">{error}</div>}
       {message && <div className="inline-status"><CheckCircle2 size={16} color="var(--success)" />{message}</div>}
 
+      {uiMode === 'guided' && (
+        <section className="glass-panel project-form">
+          <div className="settings-section-title">
+            <CheckCircle2 size={22} color="var(--accent)" />
+            <h3>Guided Workflow</h3>
+          </div>
+          <div className="task-list">
+            <div className="task-row">
+              <div>
+                <strong>1. Prepare agents</strong>
+                <p>{agents.length > 0 ? `${agents.length} agents available.` : 'Create the default agents for this workspace.'}</p>
+              </div>
+              <button className="btn btn-glass btn-sm" type="button" onClick={createDefaultAgents}>
+                Generate Defaults
+              </button>
+            </div>
+            <div className="task-row">
+              <div>
+                <strong>2. Build the plan</strong>
+                <p>{tasks.length > 0 ? `${tasks.length} tasks in the current plan.` : 'Run the orchestrator to generate the task plan from the project context.'}</p>
+              </div>
+              <button className="btn btn-primary btn-sm" type="button" onClick={runOrchestrator} disabled={orchestrating}>
+                {orchestrating ? 'Starting...' : 'Generate Plan'}
+              </button>
+            </div>
+            <div className="task-row">
+              <div>
+                <strong>3. Review outputs</strong>
+                <p>{tasksAwaitingApproval > 0 ? `${tasksAwaitingApproval} tasks are waiting for approval.` : 'No tasks are waiting for approval right now.'}</p>
+              </div>
+              {tasksAwaitingApproval > 0 && (
+                <button className="btn btn-glass btn-sm" type="button" onClick={handleApproveAll} disabled={approvingAll}>
+                  {approvingAll ? 'Approving...' : 'Approve Pending'}
+                </button>
+              )}
+            </div>
+            <div className="task-row">
+              <div>
+                <strong>4. Finalize</strong>
+                <p>{allTasksApproved ? 'The project is ready for final reporting.' : `${completedTasks}/${tasks.length} tasks approved.`}</p>
+              </div>
+              <button className="btn btn-glass btn-sm" type="button" disabled={!allTasksApproved || reportLoading} onClick={() => openFinalReport('full')}>
+                {reportLoading ? 'Building...' : 'Open Report'}
+              </button>
+            </div>
+          </div>
+          <button className="btn btn-glass" type="button" onClick={() => setShowAdvancedTaskControls((current) => !current)}>
+            {showAdvancedTaskControls ? 'Hide Advanced Controls' : 'Show Advanced Controls'}
+          </button>
+        </section>
+      )}
+
       <div className="project-detail-grid">
         <section className="glass-panel project-form">
+          {(uiMode === 'expert' || showAdvancedTaskControls) && (
           <div className="default-agent-panel">
             <div>
               <div className="settings-section-title">
@@ -595,11 +741,12 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, onBack }) => {
               Generate Defaults
             </button>
           </div>
+          )}
 
           <div className="settings-section-title" style={{ justifyContent: 'space-between' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
               <PlusCircle size={22} color="var(--accent)" />
-              <h3>{editingTaskId ? 'Edit Task' : 'Add Task'}</h3>
+              <h3>{editingTaskId ? 'Edit Task' : uiMode === 'guided' ? 'Add Manual Task' : 'Add Task'}</h3>
             </div>
             {editingTaskId && (
               <button className="btn btn-icon" type="button" onClick={resetTaskForm} title="Cancel edit">
@@ -616,6 +763,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, onBack }) => {
               <span>Description</span>
               <textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={4} placeholder="Instructions for the assigned agent..." />
             </label>
+            {(uiMode === 'expert' || showAdvancedTaskControls) && (
             <label>
               <span>Assigned Agent</span>
               <select value={agentId} onChange={(event) => setAgentId(event.target.value)}>
@@ -625,6 +773,48 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, onBack }) => {
                 ))}
               </select>
             </label>
+            )}
+            {(uiMode === 'expert' || showAdvancedTaskControls) && (
+            <div className="default-agent-panel" style={{ gap: 'var(--space-sm)' }}>
+              <div>
+                <span style={{ color: 'var(--text-dim)', fontSize: '0.85rem', fontWeight: 700 }}>Dependencies</span>
+                <p style={{ color: 'var(--text-dim)', marginTop: 'var(--space-xs)', fontSize: '0.85rem' }}>
+                  Select the tasks that must be completed before this task can run.
+                </p>
+              </div>
+              {!dependencyTableAvailable && (
+                <div className="inline-status">
+                  Apply `database/task_dependencies.sql` in Supabase to enable persistent task links.
+                </div>
+              )}
+              {tasks.filter((task) => task.id !== editingTaskId).length === 0 && (
+                <p style={{ color: 'var(--text-dim)', fontSize: '0.85rem' }}>Add at least one other task to create dependencies.</p>
+              )}
+              <div style={{ display: 'grid', gap: 'var(--space-sm)', maxHeight: '220px', overflowY: 'auto' }}>
+                {tasks
+                  .filter((task) => task.id !== editingTaskId)
+                  .map((task) => (
+                    <label key={task.id} className="toggle-row" style={{ alignItems: 'flex-start' }}>
+                      <input
+                        type="checkbox"
+                        checked={dependencyIds.includes(task.id)}
+                        onChange={(event) => {
+                          setDependencyIds((current) =>
+                            event.target.checked
+                              ? [...current, task.id]
+                              : current.filter((id) => id !== task.id)
+                          );
+                        }}
+                      />
+                      <span style={{ display: 'grid', gap: '2px' }}>
+                        <strong style={{ color: 'var(--text-main)' }}>{task.title}</strong>
+                        <small style={{ color: 'var(--text-dim)' }}>{task.status.replace('_', ' ')}</small>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
             <button className="btn btn-primary" type="submit" disabled={saving}>
               <CheckCircle2 size={18} />
               {saving ? (editingTaskId ? 'Saving...' : 'Adding...') : (editingTaskId ? 'Save Task' : 'Add Task')}
@@ -667,7 +857,22 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, onBack }) => {
                 <div style={{ flex: 1 }}>
                   <strong>{task.title}</strong>
                   <p>{task.description || 'No description provided.'}</p>
+                  {(uiMode === 'expert' || showAdvancedTaskControls) && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: 'var(--space-sm)' }}>
+                    {dependencyMap(task.id).length > 0 && (
+                      <span className="task-meta-chip">
+                        Depends on {dependencyMap(task.id).length}
+                      </span>
+                    )}
+                    {dependentMap(task.id).length > 0 && (
+                      <span className="task-meta-chip">
+                        Blocks {dependentMap(task.id).length}
+                      </span>
+                    )}
+                  </div>
+                  )}
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-sm)', marginTop: 'var(--space-sm)', alignItems: 'center' }}>
+                    {(uiMode === 'expert' || showAdvancedTaskControls) && (
                     <select
                       value={task.assigned_agent_id ?? ''}
                       onClick={(e) => e.stopPropagation()}
@@ -682,6 +887,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, onBack }) => {
                         <option key={agent.id} value={agent.id}>{agent.name} ({agent.model})</option>
                       ))}
                     </select>
+                    )}
                     <button
                       className="btn btn-glass btn-sm"
                       type="button"
@@ -706,6 +912,15 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, onBack }) => {
                       Delete
                     </button>
                   </div>
+                  {(uiMode === 'expert' || showAdvancedTaskControls) && dependencyMap(task.id).length > 0 && (
+                    <div style={{ marginTop: 'var(--space-sm)', display: 'grid', gap: '4px' }}>
+                      {dependencyMap(task.id).map((dependencyTaskId) => (
+                        <small key={dependencyTaskId} style={{ color: 'var(--text-dim)' }}>
+                          Requires: {taskLookup.get(dependencyTaskId)?.title ?? 'Unknown task'}
+                        </small>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
                   <span className={`status-badge status-${task.status}`}>
