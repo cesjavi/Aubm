@@ -3,6 +3,7 @@ interface RuntimeConfig {
   supabaseUrl?: string;
   supabaseAnonKey?: string;
   sentryDsn?: string;
+  appVersion?: string;
 }
 
 declare global {
@@ -26,3 +27,5 @@ export const getSupabaseAnonKey = () => (
 export const getSentryDsn = () => (
   import.meta.env.VITE_SENTRY_DSN || runtimeConfig.sentryDsn || ''
 );
+
+export const getAppVersion = () => runtimeConfig.appVersion || import.meta.env.VITE_APP_VERSION || '0.7.0';

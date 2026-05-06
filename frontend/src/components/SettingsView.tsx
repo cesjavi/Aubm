@@ -4,7 +4,7 @@ import { motion } from 'framer-motion';
 import { useAuth } from '../context/useAuth';
 import { getDefaultModel, getDefaultProvider, providerOptions, saveProviderDefaults } from '../services/llmConfig';
 import type { SupportedProvider } from '../services/llmConfig';
-import { getApiUrl, getSupabaseUrl } from '../services/runtimeConfig';
+import { getApiUrl, getAppVersion, getSupabaseUrl } from '../services/runtimeConfig';
 import type { UiMode } from '../services/uiMode';
 import { supabase } from '../services/supabase';
 
@@ -32,7 +32,8 @@ const SettingsView: React.FC<{ uiMode: UiMode; onUiModeChange: (mode: UiMode) =>
   const config = useMemo(() => {
     const apiUrl = getApiUrl() || 'Same origin';
     const supabaseUrl = getSupabaseUrl() || 'Not configured';
-    return { apiUrl, supabaseUrl };
+    const appVersion = getAppVersion();
+    return { apiUrl, supabaseUrl, appVersion };
   }, []);
 
   const providerModels = providerOptions.find((option) => option.id === provider)?.models ?? [];
@@ -169,6 +170,7 @@ const SettingsView: React.FC<{ uiMode: UiMode; onUiModeChange: (mode: UiMode) =>
           <SettingRow label="API URL" value={config.apiUrl} />
           <SettingRow label="Supabase URL" value={config.supabaseUrl} />
           <SettingRow label="Frontend Mode" value={import.meta.env.MODE} />
+          <SettingRow label="App Version" value={config.appVersion} />
         </section>
 
         <section className="glass-panel settings-section">

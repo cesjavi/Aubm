@@ -10,6 +10,7 @@ import sentry_sdk
 # Load environment variables
 load_dotenv()
 FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+APP_VERSION = (Path(__file__).resolve().parent.parent / "VERSION").read_text(encoding="utf-8").strip()
 
 # Sentry Initialization
 SENTRY_DSN = os.getenv("SENTRY_DSN")
@@ -23,7 +24,7 @@ if SENTRY_DSN:
 app = FastAPI(
     title="Aubm API",
     description="Enterprise-Grade AI Agent Orchestration & Collaboration Platform",
-    version="0.1.0"
+    version=APP_VERSION
 )
 
 # CORS Configuration
@@ -46,7 +47,7 @@ async def root():
     return {
         "status": "online",
         "message": "Aubm API is operational",
-        "version": "0.1.0"
+        "version": APP_VERSION
     }
 
 # Placeholder for routers
@@ -63,6 +64,7 @@ async def runtime_config():
         "supabaseUrl": os.getenv("VITE_SUPABASE_URL", os.getenv("SUPABASE_URL", "")),
         "supabaseAnonKey": os.getenv("VITE_SUPABASE_ANON_KEY", os.getenv("SUPABASE_ANON_KEY", "")),
         "sentryDsn": os.getenv("VITE_SENTRY_DSN", os.getenv("SENTRY_DSN", "")),
+        "appVersion": APP_VERSION,
     }
     return Response(
         content=f"window.__AUBM_CONFIG__ = {json.dumps(config)};",

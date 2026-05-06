@@ -31,11 +31,13 @@ import SplashScreen from './components/SplashScreen';
 import { useEffect } from 'react';
 import { getUiMode, saveUiMode } from './services/uiMode';
 import type { UiMode } from './services/uiMode';
+import { getAppVersion } from './services/runtimeConfig';
 
 type AppTab = 'dashboard' | 'project-detail' | 'agents' | 'marketplace' | 'debate' | 'voice' | 'spatial' | 'monitoring' | 'new-project' | 'settings';
 
 const App: React.FC = () => {
   const { session, loading, signOut, profile, user } = useAuth();
+  const appVersion = getAppVersion();
   const [activeTab, setActiveTab] = useState<AppTab>('dashboard');
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [initialTaskId, setInitialTaskId] = useState<string | null>(null);
@@ -177,6 +179,9 @@ const App: React.FC = () => {
                   <div style={{ fontWeight: 600 }}>{profile?.full_name || user?.email || 'User'}</div>
                   <div style={{ fontSize: '0.8rem', color: 'var(--text-dim)' }}>{profile?.role || 'user'}</div>
                 </div>
+              </div>
+              <div style={{ marginTop: 'var(--space-sm)', fontSize: '0.75rem', color: 'var(--text-dim)' }}>
+                Version {appVersion}
               </div>
             </div>
           </motion.aside>
