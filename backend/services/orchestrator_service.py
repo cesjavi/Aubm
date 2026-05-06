@@ -2,11 +2,26 @@ from services.supabase_service import supabase
 from agents.agent_factory import AgentFactory
 import json
 import logging
+import re
 from services.config import settings
 from services.agent_runner_service import AgentRunnerService
 from services.output_quality import clean_report_text, dedupe_lines, filter_report_sections, report_text_from_output
 
 logger = logging.getLogger("uvicorn")
+
+NOISY_REPORT_KEYS = {
+    "raw_text",
+    "sampleBackendCode",
+    "sampleUploadSnippet",
+    "sampleSearchEndpoint",
+    "sampleRedisCartHelper",
+    "sampleWebhookHandler",
+    "sampleStateMachine",
+    "repositoryStructure",
+    "wireframes",
+    "dataModel",
+    "userStories",
+}
 
 def _humanize_key(key: str) -> str:
     return key.replace("_", " ").replace("-", " ").strip().title()
@@ -36,6 +51,8 @@ def _format_value_for_report(value, level: int = 0) -> list[str]:
     if isinstance(value, dict):
         lines: list[str] = []
         for key, item in value.items():
+            if str(key) in NOISY_REPORT_KEYS:
+                continue
             title = _humanize_key(str(key))
             if isinstance(item, dict):
                 lines.append(f"{title}:")
@@ -48,6 +65,24 @@ def _format_value_for_report(value, level: int = 0) -> list[str]:
         return lines or ["No details."]
 
     return [str(value)]
+
+
+def _extract_json_payload(text: str):
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        stripped = stripped.strip("`")
+        if stripped.lower().startswith("json"):
+            stripped = stripped[4:].strip()
+    try:
+        return json.loads(stripped)
+    except Exception:
+        match = re.search(r"```json\s*(.*?)\s*```", text, re.IGNORECASE | re.DOTALL)
+        if match:
+            try:
+                return json.loads(match.group(1))
+            except Exception:
+                return None
+    return None
 
 def _format_output_for_report(output_data) -> str:
     if not output_data:
@@ -64,6 +99,9 @@ def _format_output_for_report(output_data) -> str:
         primary = output_data
 
     if isinstance(primary, str):
+        parsed = _extract_json_payload(primary)
+        if parsed is not None:
+            return clean_report_text(dedupe_lines("\n".join(_format_value_for_report(parsed))))
         return clean_report_text(dedupe_lines(primary))
 
     return clean_report_text(dedupe_lines("\n".join(_format_value_for_report(primary))))
