@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { ArrowLeft, Bot, CheckCircle2, Download, FileText, ListTodo, PlayCircle, PlusCircle, RefreshCw } from 'lucide-react';
+import { ArrowLeft, Bot, CheckCircle2, Download, FilePenLine, FileText, ListTodo, PlayCircle, PlusCircle, RefreshCw, Trash2, X } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { supabase } from '../services/supabase';
 import { useAuth } from '../context/useAuth';
@@ -17,6 +17,7 @@ interface Project {
 interface Agent {
   id: string;
   name: string;
+  role?: string | null;
   model: string;
 }
 
@@ -73,6 +74,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, onBack }) => {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [agentId, setAgentId] = useState('');
+  const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [orchestrating, setOrchestrating] = useState(false);
   const [approvingAll, setApprovingAll] = useState(false);
@@ -134,7 +136,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, onBack }) => {
     const [{ data: projectData, error: projectError }, { data: taskData, error: taskError }, { data: agentData }] = await Promise.all([
       supabase.from('projects').select('id,name,description,context,status').eq('id', projectId).single(),
       supabase.from('tasks').select('id,title,description,status,priority,assigned_agent_id,output_data').eq('project_id', projectId).order('created_at', { ascending: false }),
-      supabase.from('agents').select('id,name,model').order('created_at', { ascending: false })
+      supabase.from('agents').select('id,name,role,model').order('created_at', { ascending: false })
     ]);
 
     if (projectError) setError(projectError.message);
@@ -149,31 +151,98 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, onBack }) => {
     loadProject();
   }, [loadProject]);
 
+  const resetTaskForm = () => {
+    setEditingTaskId(null);
+    setTitle('');
+    setDescription('');
+    setAgentId('');
+  };
+
+  const startEditingTask = (task: Task) => {
+    setEditingTaskId(task.id);
+    setTitle(task.title);
+    setDescription(task.description ?? '');
+    setAgentId(task.assigned_agent_id ?? '');
+    setError(null);
+    setMessage(null);
+  };
+
   const createTask = async (event: React.FormEvent) => {
     event.preventDefault();
     setSaving(true);
     setError(null);
+    setMessage(null);
 
-    const { error: insertError } = await supabase.from('tasks').insert({
-      project_id: projectId,
+    const payload = {
       title,
       description,
       assigned_agent_id: agentId || null,
-      status: 'todo',
-      priority: 0
-    });
+    };
 
-    if (insertError) {
-      setError(insertError.message);
+    const response = editingTaskId
+      ? await supabase.from('tasks').update(payload).eq('id', editingTaskId)
+      : await supabase.from('tasks').insert({
+          project_id: projectId,
+          ...payload,
+          status: 'todo',
+          priority: 0
+        });
+
+    if (response.error) {
+      setError(response.error.message);
     } else {
-      setTitle('');
-      setDescription('');
-      setAgentId('');
+      resetTaskForm();
       await loadProject();
-      setMessage('Task added.');
+      setMessage(editingTaskId ? 'Task updated.' : 'Task added.');
     }
 
     setSaving(false);
+  };
+
+  const handleDeleteTask = async (task: Task) => {
+    const confirmed = window.confirm(`Delete task "${task.title}"? This cannot be undone.`);
+    if (!confirmed) return;
+
+    setError(null);
+    setMessage(null);
+
+    const { error: deleteError } = await supabase.from('tasks').delete().eq('id', task.id);
+    if (deleteError) {
+      setError(deleteError.message);
+      return;
+    }
+
+    if (editingTaskId === task.id) {
+      resetTaskForm();
+    }
+    if (selectedTask?.id === task.id) {
+      setSelectedTask(null);
+    }
+
+    await loadProject();
+    setMessage('Task deleted.');
+  };
+
+  const assignTaskAgent = async (taskId: string, assignedAgentId: string) => {
+    setError(null);
+    setMessage(null);
+
+    const { error: updateError } = await supabase
+      .from('tasks')
+      .update({ assigned_agent_id: assignedAgentId || null })
+      .eq('id', taskId);
+
+    if (updateError) {
+      setError(updateError.message);
+      return;
+    }
+
+    if (editingTaskId === taskId) {
+      setAgentId(assignedAgentId);
+    }
+
+    await loadProject();
+    setMessage('Task assignment updated.');
   };
 
   const createDefaultAgents = async () => {
@@ -527,9 +596,16 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, onBack }) => {
             </button>
           </div>
 
-          <div className="settings-section-title">
-            <PlusCircle size={22} color="var(--accent)" />
-            <h3>Add Task</h3>
+          <div className="settings-section-title" style={{ justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
+              <PlusCircle size={22} color="var(--accent)" />
+              <h3>{editingTaskId ? 'Edit Task' : 'Add Task'}</h3>
+            </div>
+            {editingTaskId && (
+              <button className="btn btn-icon" type="button" onClick={resetTaskForm} title="Cancel edit">
+                <X size={18} />
+              </button>
+            )}
           </div>
           <form onSubmit={createTask} style={{ display: 'grid', gap: 'var(--space-md)' }}>
             <label>
@@ -551,7 +627,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, onBack }) => {
             </label>
             <button className="btn btn-primary" type="submit" disabled={saving}>
               <CheckCircle2 size={18} />
-              {saving ? 'Adding...' : 'Add Task'}
+              {saving ? (editingTaskId ? 'Saving...' : 'Adding...') : (editingTaskId ? 'Save Task' : 'Add Task')}
             </button>
           </form>
         </section>
@@ -591,6 +667,45 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, onBack }) => {
                 <div style={{ flex: 1 }}>
                   <strong>{task.title}</strong>
                   <p>{task.description || 'No description provided.'}</p>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-sm)', marginTop: 'var(--space-sm)', alignItems: 'center' }}>
+                    <select
+                      value={task.assigned_agent_id ?? ''}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={(e) => {
+                        e.stopPropagation();
+                        assignTaskAgent(task.id, e.target.value);
+                      }}
+                      style={{ maxWidth: '320px' }}
+                    >
+                      <option value="">Unassigned</option>
+                      {agents.map((agent) => (
+                        <option key={agent.id} value={agent.id}>{agent.name} ({agent.model})</option>
+                      ))}
+                    </select>
+                    <button
+                      className="btn btn-glass btn-sm"
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        startEditingTask(task);
+                      }}
+                    >
+                      <FilePenLine size={14} />
+                      Edit
+                    </button>
+                    <button
+                      className="btn btn-glass btn-sm"
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteTask(task);
+                      }}
+                      style={{ color: 'var(--danger)', borderColor: 'rgba(231, 76, 60, 0.25)' }}
+                    >
+                      <Trash2 size={14} />
+                      Delete
+                    </button>
+                  </div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
                   <span className={`status-badge status-${task.status}`}>

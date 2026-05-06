@@ -73,6 +73,7 @@ SUPABASE_URL=your_project_url
 SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
 OPENAI_API_KEY=optional_key
 GROQ_API_KEY=optional_key
+TAVILY_API_KEY=optional_key
 # See SPEC.md for all available providers
 ```
 
@@ -126,6 +127,7 @@ GROQ_API_KEY=optional_key
 OPENAI_API_KEY=optional_key
 GEMINI_API_KEY=optional_key
 AMD_API_KEY=optional_key
+TAVILY_API_KEY=optional_key
 TASK_QUEUE_EMBEDDED_WORKER=true
 ```
 

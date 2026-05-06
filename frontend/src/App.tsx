@@ -4,7 +4,6 @@ import {
   LayoutDashboard, 
   Settings, 
   PlusCircle, 
-  Terminal,
   Menu,
   X,
   LogOut,

@@ -16,8 +16,8 @@ class ToolRegistry:
         self.visuals = VisualsTool()
         self.tools = {
             "web_search": {
-                "func": self.browser.google_search,
-                "description": "Searches the web for a given query and returns the results."
+                "func": self.browser.web_search,
+                "description": "Searches the public web using Tavily and returns summarized results with source URLs."
             },
             "extract_url": {
                 "func": self.browser.search_and_extract,
@@ -70,11 +70,21 @@ class ToolRegistry:
                 "type": "function",
                 "function": {
                     "name": "web_search",
-                    "description": "Search the web for information",
+                    "description": "Search the public web for information using Tavily. Use this when the task requires current external information.",
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "query": {"type": "string", "description": "The search query"}
+                            "query": {"type": "string", "description": "The search query"},
+                            "topic": {
+                                "type": "string",
+                                "enum": ["general", "news", "finance"],
+                                "description": "The search category. Use news for recent events and finance for market/company financial queries."
+                            },
+                            "max_results": {
+                                "type": "integer",
+                                "description": "Maximum number of results to return. Keep this small to control context size.",
+                                "default": 5
+                            }
                         },
                         "required": ["query"]
                     }

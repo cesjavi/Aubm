@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Bot, CheckCircle2, PlusCircle, RefreshCw } from 'lucide-react';
+import { Bot, CheckCircle2, PlusCircle, RefreshCw, X } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { supabase } from '../services/supabase';
 import { useAuth } from '../context/useAuth';
@@ -20,6 +20,7 @@ const AgentsView: React.FC = () => {
   const { user } = useAuth();
   const defaultProvider = useMemo(() => getDefaultProvider(), []);
   const [agents, setAgents] = useState<Agent[]>([]);
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [role, setRole] = useState('');
   const [provider, setProvider] = useState<SupportedProvider>(defaultProvider);
@@ -31,6 +32,7 @@ const AgentsView: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
 
   const providerModels = providerOptions.find((option) => option.id === provider)?.models ?? [];
+  const isEditing = selectedAgentId !== null;
 
   const loadAgents = async () => {
     setLoading(true);
@@ -55,10 +57,30 @@ const AgentsView: React.FC = () => {
     setModel(getDefaultModel(value));
   };
 
-  const createAgent = async (event: React.FormEvent) => {
+  const resetForm = () => {
+    setSelectedAgentId(null);
+    setName('');
+    setRole('');
+    setProvider(defaultProvider);
+    setModel(getDefaultModel(defaultProvider));
+    setSystemPrompt('');
+  };
+
+  const selectAgent = (agent: Agent) => {
+    setSelectedAgentId(agent.id);
+    setName(agent.name);
+    setRole(agent.role ?? '');
+    setProvider(agent.api_provider);
+    setModel(agent.model);
+    setSystemPrompt(agent.system_prompt ?? '');
+    setMessage(null);
+    setError(null);
+  };
+
+  const saveAgent = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!user) {
-      setError('You must be signed in to create an agent.');
+      setError(`You must be signed in to ${isEditing ? 'update' : 'create'} an agent.`);
       return;
     }
 
@@ -66,22 +88,24 @@ const AgentsView: React.FC = () => {
     setError(null);
     setMessage(null);
 
-    const { error: insertError } = await supabase.from('agents').insert({
+    const payload = {
       user_id: user.id,
       name,
       role,
       api_provider: provider,
       model,
       system_prompt: systemPrompt || `You are ${name}, acting as ${role || 'an AI agent'}.`
-    });
+    };
 
-    if (insertError) {
-      setError(insertError.message);
+    const response = isEditing
+      ? await supabase.from('agents').update(payload).eq('id', selectedAgentId)
+      : await supabase.from('agents').insert(payload);
+
+    if (response.error) {
+      setError(response.error.message);
     } else {
-      setName('');
-      setRole('');
-      setSystemPrompt('');
-      setMessage('Agent created successfully.');
+      resetForm();
+      setMessage(isEditing ? 'Agent updated successfully.' : 'Agent created successfully.');
       await loadAgents();
     }
 
@@ -109,11 +133,18 @@ const AgentsView: React.FC = () => {
 
       <div className="project-detail-grid">
         <section className="glass-panel project-form">
-          <div className="settings-section-title">
-            <PlusCircle size={22} color="var(--accent)" />
-            <h3>Create Agent</h3>
+          <div className="settings-section-title" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
+              <PlusCircle size={22} color="var(--accent)" />
+              <h3>{isEditing ? 'Edit Agent' : 'Create Agent'}</h3>
+            </div>
+            {isEditing && (
+              <button className="btn btn-icon" type="button" onClick={resetForm} title="Close editor">
+                <X size={18} />
+              </button>
+            )}
           </div>
-          <form onSubmit={createAgent} style={{ display: 'grid', gap: 'var(--space-md)' }}>
+          <form onSubmit={saveAgent} style={{ display: 'grid', gap: 'var(--space-md)' }}>
             <label>
               <span>Name</span>
               <input value={name} onChange={(event) => setName(event.target.value)} required placeholder="Research Analyst" />
@@ -146,7 +177,7 @@ const AgentsView: React.FC = () => {
             </label>
             <button className="btn btn-primary" type="submit" disabled={saving}>
               <Bot size={18} />
-              {saving ? 'Creating...' : 'Create Agent'}
+              {saving ? (isEditing ? 'Saving...' : 'Creating...') : (isEditing ? 'Save Agent' : 'Create Agent')}
             </button>
           </form>
         </section>
@@ -159,13 +190,25 @@ const AgentsView: React.FC = () => {
           {agents.length === 0 && <p style={{ color: 'var(--text-dim)' }}>No agents created yet.</p>}
           <div className="task-list">
             {agents.map((agent) => (
-              <div key={agent.id} className="task-row">
+              <button
+                key={agent.id}
+                type="button"
+                className="task-row"
+                onClick={() => selectAgent(agent)}
+                style={{
+                  width: '100%',
+                  background: selectedAgentId === agent.id ? 'rgba(255,255,255,0.06)' : undefined,
+                  borderColor: selectedAgentId === agent.id ? 'var(--accent)' : undefined,
+                  textAlign: 'left',
+                  cursor: 'pointer'
+                }}
+              >
                 <div>
                   <strong>{agent.name}</strong>
                   <p>{agent.role || 'No role provided.'}</p>
                 </div>
                 <span>{agent.api_provider} / {agent.model}</span>
-              </div>
+              </button>
             ))}
           </div>
         </section>

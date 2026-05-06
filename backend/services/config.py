@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: Optional[str] = None
     ANTHROPIC_API_KEY: Optional[str] = None
     AMD_API_KEY: Optional[str] = None
+    TAVILY_API_KEY: Optional[str] = None
     
     # App Config
     TASK_QUEUE_EMBEDDED_WORKER: bool = True

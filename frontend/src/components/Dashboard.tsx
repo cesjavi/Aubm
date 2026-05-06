@@ -131,7 +131,6 @@ const Dashboard: React.FC<DashboardProps> = ({ onNewProject, onOpenProject }) =>
             <ProjectCard
               key={project.id}
               name={project.name}
-              description={project.description}
               status={project.status}
               tasksDone={counts.done}
               tasksTotal={counts.total}
@@ -145,9 +144,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onNewProject, onOpenProject }) =>
   );
 };
 
-const ProjectCard: React.FC<{ name: string; description: string | null; status: string; tasksDone: number; tasksTotal: number; onOpen: () => void; onDelete: () => void }> = ({
+const ProjectCard: React.FC<{ name: string; status: string; tasksDone: number; tasksTotal: number; onOpen: () => void; onDelete: () => void }> = ({
   name,
-  description,
   status,
   tasksDone,
   tasksTotal,
