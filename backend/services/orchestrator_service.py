@@ -69,6 +69,34 @@ def _format_output_for_report(output_data) -> str:
     return clean_report_text(dedupe_lines("\n".join(_format_value_for_report(primary))))
 
 
+def _is_empty_curated_text(text: str) -> bool:
+    normalized = (text or "").strip().lower()
+    return normalized in {
+        "",
+        "no approved output was saved for this task.",
+        "{}",
+        "[]",
+    }
+
+
+def _format_conclusion_payload(data: dict) -> str:
+    conclusion = data.get("strategicConclusion") or data.get("conclusion") or data.get("content") or ""
+    next_steps = data.get("nextSteps") or data.get("next_steps") or []
+
+    lines: list[str] = []
+    if isinstance(conclusion, str) and conclusion.strip():
+        lines.append(conclusion.strip())
+
+    if isinstance(next_steps, list) and next_steps:
+        lines.append("")
+        lines.append("Next steps:")
+        for step in next_steps[:5]:
+            if isinstance(step, str) and step.strip():
+                lines.append(f"- {step.strip()}")
+
+    return "\n".join(lines).strip() or "\n".join(_format_value_for_report(data))
+
+
 def _has_usable_output(output_data) -> bool:
     if not output_data:
         return False
@@ -505,11 +533,19 @@ class OrchestratorService:
         lines.extend(["## Approved Work Summary", ""])
 
         report_exclusions: list[str] = []
-        for index, task in enumerate(curated_tasks, start=1):
+        kept_task_count = 0
+        for task in curated_tasks:
             curated_text, excluded_lines = self._curate_task_output(task.get("output_data"))
             report_exclusions.extend(excluded_lines)
+            if _is_empty_curated_text(curated_text):
+                excluded_tasks.append({
+                    "title": task.get("title", "Untitled task"),
+                    "reasons": ["Task output became empty after quality filtering."]
+                })
+                continue
+            kept_task_count += 1
             lines.extend([
-                f"### {index}. {task['title']}",
+                f"### {kept_task_count}. {task['title']}",
                 task.get("description") or "No task description provided.",
                 "",
                 curated_text,
@@ -551,7 +587,7 @@ class OrchestratorService:
                         if isinstance(data, str):
                             conclusion = data
                         elif isinstance(data, dict):
-                            conclusion = data.get("conclusion") or data.get("content") or str(data)
+                            conclusion = _format_conclusion_payload(data)
             except Exception as exc:
                 logger.warning(f"Failed to generate dynamic conclusion: {exc}")
 
@@ -560,7 +596,7 @@ class OrchestratorService:
             conclusion,
             "",
             "## Completion Status",
-            f"{len(tasks)} tasks reached done status. {len(curated_tasks)} task outputs passed final quality validation. {len(excluded_tasks)} task outputs were excluded from the final report."
+            f"{len(tasks)} tasks reached done status. {kept_task_count} task outputs were included in the final report. {len(excluded_tasks)} task outputs were excluded from the final report."
         ])
 
         supabase.table("projects").update({"status": "completed"}).eq("id", project_id).execute()
@@ -577,7 +613,7 @@ class OrchestratorService:
         return {
             "project_id": project_id,
             "project_name": project["name"],
-            "task_count": len(curated_tasks),
+            "task_count": kept_task_count,
             "variant": variant,
             "report": clean_report_text(dedupe_lines(report)),
             "charts": _build_report_charts(curated_tasks)

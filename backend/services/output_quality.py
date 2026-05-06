@@ -271,7 +271,7 @@ def report_text_from_output(output_data: Any) -> str:
 
 
 def clean_report_text(text: str) -> str:
-    cleaned = text.replace("■", "-")
+    cleaned = text.replace("■", "-").replace("\u25A0", "-")
     cleaned = re.sub(r"[ \t]+", " ", cleaned)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
     return cleaned.strip()
@@ -307,3 +307,5 @@ def filter_report_sections(text: str) -> tuple[str, list[str]]:
             continue
         kept_lines.append(line)
     return "\n".join(kept_lines).strip(), excluded
+
+
