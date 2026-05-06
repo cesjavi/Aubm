@@ -5,7 +5,7 @@ import logging
 import re
 from services.config import settings
 from services.agent_runner_service import AgentRunnerService
-from services.output_quality import clean_report_text, dedupe_lines, filter_report_sections, report_text_from_output
+from services.output_quality import clean_report_text, dedupe_lines, filter_report_sections, validate_output
 
 logger = logging.getLogger("uvicorn")
 
@@ -495,7 +495,7 @@ class OrchestratorService:
 
         return None
 
-    def _quality_approved_tasks(self, tasks: list[dict]) -> tuple[list[dict], list[dict]]:
+    def _quality_approved_tasks(self, tasks: list[dict], project: dict) -> tuple[list[dict], list[dict]]:
         approved: list[dict] = []
         excluded: list[dict] = []
         for task in tasks:
@@ -506,7 +506,10 @@ class OrchestratorService:
                     "reasons": ["Task has no usable approved output."]
                 })
                 continue
+            task_with_project = {**task, "project": project}
             quality_review = output_data.get("quality_review") if isinstance(output_data, dict) else None
+            if not quality_review and isinstance(output_data, dict):
+                quality_review = validate_output(task_with_project, output_data)
             if quality_review and not quality_review.get("approved", False):
                 excluded.append({
                     "title": task.get("title", "Untitled task"),
@@ -517,7 +520,7 @@ class OrchestratorService:
         return approved, excluded
 
     def _curate_task_output(self, output_data) -> tuple[str, list[str]]:
-        text = report_text_from_output(output_data)
+        text = _format_output_for_report(output_data)
         text = clean_report_text(dedupe_lines(text))
         text, excluded_lines = filter_report_sections(text)
         return text or "No approved output was saved for this task.", excluded_lines
@@ -546,7 +549,7 @@ class OrchestratorService:
         if incomplete:
             raise ValueError(f"Final report is available after all tasks are approved. Pending tasks: {len(incomplete)}")
 
-        curated_tasks, excluded_tasks = self._quality_approved_tasks(tasks)
+        curated_tasks, excluded_tasks = self._quality_approved_tasks(tasks, project)
         if not curated_tasks:
             raise ValueError("No approved task outputs passed quality validation for final reporting.")
 
