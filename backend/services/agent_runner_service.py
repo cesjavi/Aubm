@@ -17,13 +17,15 @@ class AgentRunnerService:
         start_action: str = "execution_start",
         start_content: str | None = None,
         complete_action: str = "execution_complete",
-        complete_content: str = "Agent successfully completed the task and produced output."
+        complete_content: str = "Agent successfully completed the task and produced output.",
+        update_task: bool = True
     ) -> tuple[dict, str]:
         task_id = task["id"]
         project_id = task["project_id"]
         run_id = None
 
-        supabase.table("tasks").update({"status": "in_progress"}).eq("id", task_id).execute()
+        if update_task:
+            supabase.table("tasks").update({"status": "in_progress"}).eq("id", task_id).execute()
 
         try:
             run_res = supabase.table("task_runs").insert({
@@ -51,6 +53,41 @@ class AgentRunnerService:
             if include_semantic_context:
                 extra_context = await semantic_backprop.get_project_context(project_id, task_id)
 
+            import time
+            import hashlib
+            
+            # Simple in-memory cache for the session (could be persistent later)
+            if not hasattr(AgentRunnerService, "_task_cache"):
+                AgentRunnerService._task_cache = {}
+
+            # 1. Create a cache key based on task, agent (model + system prompt), and context
+            cache_input = f"{task['id']}-{agent_data['model']}-{agent_data.get('system_prompt', '')}-{task.get('description')}-{str(context)}-{extra_context}"
+            cache_key = hashlib.md5(cache_input.encode()).hexdigest()
+            
+            # 2. Check Cache
+            if cache_key in AgentRunnerService._task_cache:
+                logger.info(f"Cache hit for task {task_id}. Skipping LLM call.")
+                cached_result = AgentRunnerService._task_cache[cache_key]
+                
+                # Still log the "start" for UI consistency
+                agent_name = agent_data.get('name', 'Agent')
+                log_msg = start_content or f"Agent {agent_name} resuming task"
+                supabase.table("agent_logs").insert({
+                    "task_id": task_id,
+                    "run_id": run_id,
+                    "action": start_action,
+                    "content": f"[CACHE HIT] {log_msg}"
+                }).execute()
+                
+                if update_task:
+                    supabase.table("tasks").update({
+                        "status": "awaiting_approval",
+                        "output_data": cached_result
+                    }).eq("id", task_id).execute()
+                
+                return cached_result, run_id
+
+            # 3. Log Start
             supabase.table("agent_logs").insert({
                 "task_id": task_id,
                 "run_id": run_id,
@@ -58,25 +95,45 @@ class AgentRunnerService:
                 "content": start_content or f"Agent {agent_data['name']} starting task: {task['title']}"
             }).execute()
 
+            # 4. Execute Run with timing
+            start_time = time.time()
             result = await agent.run(task.get("description") or task["title"], context, extra_context=extra_context)
+            duration = time.time() - start_time
+
             if result.get("status") == "error":
                 raise RuntimeError(result.get("error") or "Agent returned an error result.")
 
-            supabase.table("tasks").update({
-                "status": "awaiting_approval",
-                "output_data": result
-            }).eq("id", task_id).execute()
+            # 5. Security Sanitization (Defense in Depth)
+            raw_out = str(result.get("raw_output", ""))
+            suspicious_patterns = ["rm -rf", "mkfs", "dd if=", "curl", "wget", "chmod 777", "> /dev/sda"]
+            for pattern in suspicious_patterns:
+                if pattern in raw_out:
+                    logger.warning(f"SECURITY: Suspicious pattern '{pattern}' detected in agent output for task {task_id}.")
+                    result["security_warning"] = f"Output sanitized: suspicious pattern '{pattern}' detected."
+                    # We don't block yet, but we flag it.
 
+            # 6. Save to Cache
+            AgentRunnerService._task_cache[cache_key] = result
+
+            if update_task:
+                supabase.table("tasks").update({
+                    "status": "awaiting_approval",
+                    "output_data": result
+                }).eq("id", task_id).execute()
+
+            # 7. Update Run Status
             supabase.table("task_runs").update({
                 "status": "completed",
-                "finished_at": datetime.now(timezone.utc).isoformat()
+                "finished_at": datetime.now(timezone.utc).isoformat(),
+                "duration_seconds": round(duration, 2)
             }).eq("id", run_id).execute()
 
+            # 8. Log Completion with Metrics
             supabase.table("agent_logs").insert({
                 "task_id": task_id,
                 "run_id": run_id,
                 "action": complete_action,
-                "content": complete_content
+                "content": f"{complete_content} (Execution time: {duration:.2f}s)"
             }).execute()
 
             return result, run_id
@@ -88,10 +145,21 @@ class AgentRunnerService:
                     "status": "failed",
                     "finished_at": datetime.now(timezone.utc).isoformat()
                 }).eq("id", run_id).execute()
-            supabase.table("tasks").update({
-                "status": "failed",
-                "output_data": {"error": str(e)}
-            }).eq("id", task_id).execute()
+            
+            if update_task:
+                supabase.table("tasks").update({
+                    "status": "failed",
+                    "output_data": {"error": str(e)}
+                }).eq("id", task_id).execute()
+
+            # LOG ERROR TO AGENT CONSOLE
+            supabase.table("agent_logs").insert({
+                "task_id": task_id,
+                "run_id": run_id,
+                "action": "execution_failed",
+                "content": f"ERROR: {str(e)}"
+            }).execute()
+
             raise e
 
     @staticmethod

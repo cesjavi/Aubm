@@ -5,24 +5,26 @@ from supabase import create_client, Client
 
 class Settings(BaseSettings):
     # Supabase
-    SUPABASE_URL: str = os.getenv("SUPABASE_URL", "")
-    SUPABASE_SERVICE_ROLE_KEY: str = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+    SUPABASE_URL: str = ""
+    SUPABASE_SERVICE_ROLE_KEY: str = ""
     
     # AI Providers
-    OPENAI_API_KEY: Optional[str] = os.getenv("OPENAI_API_KEY")
-    GROQ_API_KEY: Optional[str] = os.getenv("GROQ_API_KEY")
-    GEMINI_API_KEY: Optional[str] = os.getenv("GEMINI_API_KEY")
-    ANTHROPIC_API_KEY: Optional[str] = os.getenv("ANTHROPIC_API_KEY")
-    AMD_API_KEY: Optional[str] = os.getenv("AMD_API_KEY")
+    OPENAI_API_KEY: Optional[str] = None
+    GROQ_API_KEY: Optional[str] = None
+    GEMINI_API_KEY: Optional[str] = None
+    ANTHROPIC_API_KEY: Optional[str] = None
+    AMD_API_KEY: Optional[str] = None
     
     # App Config
-    TASK_QUEUE_EMBEDDED_WORKER: bool = os.getenv("TASK_QUEUE_EMBEDDED_WORKER", "true").lower() == "true"
-    OUTPUT_LANGUAGE: str = os.getenv("OUTPUT_LANGUAGE", "en")
-    PORT: int = int(os.getenv("PORT", 8000))
-    SENTRY_DSN: Optional[str] = os.getenv("SENTRY_DSN")
+    TASK_QUEUE_EMBEDDED_WORKER: bool = True
+    OUTPUT_LANGUAGE: str = "en"
+    PORT: int = 8000
+    SENTRY_DSN: Optional[str] = None
     
-    class Config:
-        env_file = ".env"
+    model_config = {
+        "env_file": ".env",
+        "extra": "ignore"
+    }
 
 settings = Settings()
 

@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from io import BytesIO
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from reportlab.graphics.shapes import Drawing
 from reportlab.graphics.charts.barcharts import VerticalBarChart
 from reportlab.graphics.charts.piecharts import Pie
@@ -63,18 +63,34 @@ def _report_pdf_bytes(title: str, content: str, charts: dict | None = None) -> b
     styles = getSampleStyleSheet()
     story = [Paragraph(title, styles["Title"]), Spacer(1, 0.2 * inch)]
     if charts:
-        story.extend([
-            Paragraph("Project Charts", styles["Heading2"]),
-            Paragraph("Completion Status", styles["Heading3"]),
-            _pie_chart(charts.get("status", [])),
-            Spacer(1, 0.1 * inch),
-            Paragraph("Task Categories", styles["Heading3"]),
-            _bar_chart("Task Categories", charts.get("categories", [])),
-            Spacer(1, 0.1 * inch),
-            Paragraph("Project Scores", styles["Heading3"]),
-            _bar_chart("Project Scores", charts.get("scores", [])),
-            Spacer(1, 0.2 * inch),
-        ])
+        story.append(Paragraph("Project Execution Summary", styles["Heading2"]))
+        story.append(Spacer(1, 0.1 * inch))
+        
+        # Summary Table instead of charts
+        table_data = [["Metric / Category", "Value"]]
+        
+        # Tasks Status
+        status_counts = {row["label"]: row["value"] for row in charts.get("status", [])}
+        for label, val in status_counts.items():
+            table_data.append([f"Tasks: {label}", str(val)])
+            
+        # Categories
+        for cat in charts.get("categories", []):
+            table_data.append([f"Type: {cat['label']}", str(cat['value'])])
+
+        table = Table(table_data, colWidths=[3.5*inch, 1.5*inch])
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#6e59ff")),
+            ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
+            ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+            ('BOTTOMPADDING', (0,0), (-1,0), 10),
+            ('BACKGROUND', (0,1), (-1,-1), colors.HexColor("#f8fafc")),
+            ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
+            ('FONTSIZE', (0,0), (-1,-1), 9),
+        ]))
+        story.append(table)
+        story.append(Spacer(1, 0.3 * inch))
 
     for raw_line in content.splitlines():
         line = raw_line.strip()

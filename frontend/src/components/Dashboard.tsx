@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { FolderOpen, Play, RefreshCw } from 'lucide-react';
+import { FolderOpen, Play, RefreshCw, Trash2 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { supabase } from '../services/supabase';
 import { useAuth } from '../context/useAuth';
@@ -72,6 +72,17 @@ const Dashboard: React.FC<DashboardProps> = ({ onNewProject, onOpenProject }) =>
     loadDashboard();
   }, [loadDashboard]);
 
+  const handleDeleteProject = async (id: string, name: string) => {
+    if (!window.confirm(`Are you sure you want to delete "${name}"? This action cannot be undone.`)) return;
+
+    const { error: deleteError } = await supabase.from('projects').delete().eq('id', id);
+    if (deleteError) {
+      setError(`Error deleting project: ${deleteError.message}`);
+    } else {
+      loadDashboard();
+    }
+  };
+
   const taskCounts = useMemo(() => {
     return tasks.reduce<Record<string, { done: number; total: number }>>((acc, task) => {
       if (!acc[task.project_id]) acc[task.project_id] = { done: 0, total: 0 };
@@ -125,6 +136,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNewProject, onOpenProject }) =>
               tasksDone={counts.done}
               tasksTotal={counts.total}
               onOpen={() => onOpenProject(project.id)}
+              onDelete={() => handleDeleteProject(project.id, project.name)}
             />
           );
         })}
@@ -133,26 +145,35 @@ const Dashboard: React.FC<DashboardProps> = ({ onNewProject, onOpenProject }) =>
   );
 };
 
-const ProjectCard: React.FC<{ name: string; description: string | null; status: string; tasksDone: number; tasksTotal: number; onOpen: () => void }> = ({
+const ProjectCard: React.FC<{ name: string; description: string | null; status: string; tasksDone: number; tasksTotal: number; onOpen: () => void; onDelete: () => void }> = ({
   name,
   description,
   status,
   tasksDone,
   tasksTotal,
-  onOpen
+  onOpen,
+  onDelete
 }) => {
   const progress = tasksTotal > 0 ? (tasksDone / tasksTotal) * 100 : 0;
 
   return (
     <motion.div whileHover={{ y: -5 }} className="glass-panel project-card" style={{ padding: 'var(--space-lg)', position: 'relative', overflow: 'hidden' }}>
-      <div className="project-card-header">
-        <h3 style={{ fontSize: '1.25rem' }}>{name}</h3>
-        <StatusBadge status={status} />
+      <div className="project-card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 'var(--space-md)' }}>
+        <h3 style={{ fontSize: '1.25rem', margin: 0, flex: 1, lineHeight: 1.2 }}>{name}</h3>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexShrink: 0 }}>
+          <StatusBadge status={status} />
+          <button 
+            className="btn btn-icon" 
+            onClick={(e) => { e.stopPropagation(); onDelete(); }}
+            style={{ color: 'var(--danger)', opacity: 0.6, padding: '4px' }}
+            title="Delete Project"
+          >
+            <Trash2 size={16} />
+          </button>
+        </div>
       </div>
 
-      <p style={{ color: 'var(--text-dim)', minHeight: '3rem', marginBottom: 'var(--space-lg)' }}>
-        {description || 'No description provided.'}
-      </p>
+      {/* Description removed as requested for a cleaner layout */}
 
       <div style={{ marginBottom: 'var(--space-lg)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: 'var(--space-xs)' }}>

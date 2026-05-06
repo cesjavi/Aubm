@@ -75,8 +75,10 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, onBack }) => {
   const [agentId, setAgentId] = useState('');
   const [saving, setSaving] = useState(false);
   const [orchestrating, setOrchestrating] = useState(false);
+  const [approvingAll, setApprovingAll] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [filter, setFilter] = useState<string>('all');
   const [taskActionError, setTaskActionError] = useState<string | null>(null);
   const [taskActionPending, setTaskActionPending] = useState(false);
   const [finalReport, setFinalReport] = useState<string | null>(null);
@@ -204,13 +206,32 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, onBack }) => {
   };
 
   const runOrchestrator = async () => {
+    if (tasks.length > 0) {
+      const confirmReset = window.confirm(
+        "This project already has tasks. Re-orchestrating will delete all existing tasks and progress to generate a fresh plan. Do you want to continue?"
+      );
+      if (!confirmReset) return;
+      
+      // Clear existing tasks for a fresh start
+      setOrchestrating(true);
+      setError(null);
+      setMessage(null);
+      try {
+        const { error: deleteError } = await supabase.from('tasks').delete().eq('project_id', projectId);
+        if (deleteError) throw deleteError;
+      } catch (err: any) {
+        setError(`Failed to clear existing tasks: ${err.message}`);
+        setOrchestrating(false);
+        return;
+      }
+    }
+
+    setOrchestrating(true);
     setError(null);
     setMessage(null);
-    setOrchestrating(true);
 
     try {
       const apiUrl = getApiUrl();
-
       const response = await fetch(`${apiUrl}/orchestrator/projects/${projectId}/run`, {
         method: 'POST'
       });
@@ -220,12 +241,34 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, onBack }) => {
         `Backend returned ${response.status} for POST /orchestrator/projects/${projectId}/run. Stop the stale process on port 8000 and restart backend from D:\\sistemas\\Aubm\\backend.`
       );
       setMessage('Project orchestrator started.');
-      window.setTimeout(loadProject, 1200);
+      // Refresh after a delay to show the new tasks
+      window.setTimeout(loadProject, 2000);
     } catch (exc) {
       setError(exc instanceof Error ? exc.message : 'Failed to start orchestrator.');
     } finally {
-      setOrchestrating(false);
+      // We keep orchestrating=true for a bit longer to allow the backend to finish decomposition
+      window.setTimeout(() => setOrchestrating(false), 2000);
     }
+  };
+  const handleApproveAll = async () => {
+    if (!projectId) return;
+    setApprovingAll(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const response = await fetch(`${getApiUrl()}/tasks/project/${projectId}/approve-all`, {
+        method: 'POST'
+      });
+      if (response.ok) {
+        setMessage('All pending tasks approved!');
+        loadProject();
+      } else {
+        setError('Failed to approve all tasks.');
+      }
+    } catch {
+      setError('Error connecting to backend.');
+    }
+    setApprovingAll(false);
   };
 
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
@@ -271,7 +314,15 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, onBack }) => {
 
     if (typeof output === 'object') {
       const outputRecord = output as Record<string, unknown>;
+      
+      // Handle unified debate structure or standard agent result
       const primaryOutput = outputRecord.data ?? outputRecord.raw_output ?? outputRecord.final ?? output;
+      
+      if (outputRecord.is_debate && outputRecord.debate_history) {
+        // We could also show a "Debate Consensus" prefix here
+        return typeof primaryOutput === 'string' ? primaryOutput : formatHumanReadable(primaryOutput).join('\n');
+      }
+
       return typeof primaryOutput === 'string' ? primaryOutput : formatHumanReadable(primaryOutput).join('\n');
     }
 
@@ -438,6 +489,12 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, onBack }) => {
               Pessimistic Analysis
             </button>
           )}
+          {tasks.some(t => t.status === 'awaiting_approval') && (
+            <button className="btn btn-glass" onClick={handleApproveAll} disabled={approvingAll} style={{ borderColor: 'var(--success)', color: 'var(--success)' }}>
+              <CheckCircle2 size={18} />
+              {approvingAll ? 'Approving...' : 'Approve All'}
+            </button>
+          )}
           <button className="btn btn-primary" onClick={runOrchestrator} disabled={orchestrating}>
             <PlayCircle size={18} />
             {orchestrating ? 'Starting...' : 'Run Orchestrator'}
@@ -504,10 +561,33 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, onBack }) => {
             <ListTodo size={22} color="var(--accent)" />
             <h3>Tasks</h3>
           </div>
+          <div className="filter-bar" style={{ display: 'flex', gap: '8px', marginBottom: '16px', overflowX: 'auto', paddingBottom: '4px' }}>
+            {['all', 'todo', 'in_progress', 'awaiting_approval', 'done', 'failed'].map((f) => (
+              <button 
+                key={f}
+                className={`btn ${filter === f ? 'btn-primary' : 'btn-glass'}`}
+                onClick={() => setFilter(f)}
+                style={{ fontSize: '0.75rem', padding: '4px 12px', textTransform: 'capitalize' }}
+              >
+                {f.replace('_', ' ')}
+              </button>
+            ))}
+          </div>
           {tasks.length === 0 && <p style={{ color: 'var(--text-dim)' }}>No tasks yet.</p>}
           <div className="task-list">
-            {tasks.map((task) => (
-              <div key={task.id} className="task-row">
+            {tasks
+              .filter((t) => filter === 'all' || t.status === filter)
+              .map((task) => (
+              <div 
+                key={task.id} 
+                className={`task-row ${task.output_data ? 'clickable' : ''}`}
+                onClick={() => {
+                  if (task.output_data) {
+                    setTaskActionError(null);
+                    setSelectedTask(task);
+                  }
+                }}
+              >
                 <div style={{ flex: 1 }}>
                   <strong>{task.title}</strong>
                   <p>{task.description || 'No description provided.'}</p>
@@ -519,7 +599,8 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, onBack }) => {
                   {task.status === 'awaiting_approval' && (
                     <button
                       className="btn btn-glass btn-sm"
-                      onClick={() => {
+                      onClick={(e) => {
+                        e.stopPropagation();
                         setTaskActionError(null);
                         setSelectedTask(task);
                       }}
@@ -543,12 +624,20 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, onBack }) => {
             </div>
             {taskActionError && <div className="inline-status modal-error">{taskActionError}</div>}
             <div className="button-row modal-actions">
-              <button className="btn btn-primary" onClick={() => approveTask(selectedTask.id)} disabled={taskActionPending}>
-                {taskActionPending ? 'Saving...' : 'Approve Task'}
-              </button>
-              <button className="btn btn-glass" onClick={() => rejectTask(selectedTask.id)} disabled={taskActionPending}>
-                Reject & Re-run
-              </button>
+              {selectedTask.status === 'awaiting_approval' ? (
+                <>
+                  <button className="btn btn-primary" onClick={() => approveTask(selectedTask.id)} disabled={taskActionPending}>
+                    {taskActionPending ? 'Saving...' : 'Approve Task'}
+                  </button>
+                  <button className="btn btn-glass" onClick={() => rejectTask(selectedTask.id)} disabled={taskActionPending}>
+                    Reject & Re-run
+                  </button>
+                </>
+              ) : (
+                <div style={{ flex: 1, textAlign: 'left', color: 'var(--text-dim)', fontSize: '0.9rem' }}>
+                  This task is completed and approved.
+                </div>
+              )}
               <button className="btn btn-glass" onClick={() => setSelectedTask(null)} disabled={taskActionPending}>
                 Close
               </button>

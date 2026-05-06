@@ -164,37 +164,86 @@ class OrchestratorService:
         try:
             # 1. Fetch task and agents
             task = supabase.table("tasks").select("*").eq("id", task_id).single().execute().data
-            agent_a = supabase.table("agents").select("*").eq("id", agent_a_id).single().execute().data
-            agent_b = supabase.table("agents").select("*").eq("id", agent_b_id).single().execute().data
+            agent_a_data = supabase.table("agents").select("*").eq("id", agent_a_id).single().execute().data
+            agent_b_data = supabase.table("agents").select("*").eq("id", agent_b_id).single().execute().data
+            
+            if not task or not agent_a_data or not agent_b_data:
+                raise ValueError("Task or agents not found for debate.")
+
+            # Update status to in_progress
+            supabase.table("tasks").update({"status": "in_progress"}).eq("id", task_id).execute()
             
             # 2. Agent A generates initial response
-            inst_a = AgentFactory.get_agent(agent_a["api_provider"], agent_a["name"], agent_a["role"], agent_a["model"])
-            initial_res = await inst_a.run(task["description"], [])
+            initial_res, _ = await AgentRunnerService.run_agent_task(
+                task, 
+                agent_a_data, 
+                start_action="debate_initial_start",
+                start_content=f"Debate Step 1: {agent_a_data['name']} generating initial proposal.",
+                complete_action="debate_initial_complete",
+                update_task=False
+            )
             
             # 3. Agent B reviews and critiques
-            inst_b = AgentFactory.get_agent(agent_b["api_provider"], agent_b["name"], agent_b["role"], agent_b["model"])
-            critique_prompt = f"Review the following output for the task: '{task['description']}'. Provide constructive critique and identify errors.\n\nOutput: {json.dumps(initial_res['data'])}"
-            critique_res = await inst_b.run(critique_prompt, [])
+            # We temporarily modify the task description for this run
+            task_critique = task.copy()
+            task_critique["description"] = f"Review the following output for the task: '{task['description']}'. Provide constructive critique and identify errors.\n\nOutput: {json.dumps(initial_res['data'])}"
+            
+            critique_res, _ = await AgentRunnerService.run_agent_task(
+                task_critique, 
+                agent_b_data, 
+                start_action="debate_critique_start",
+                start_content=f"Debate Step 2: {agent_b_data['name']} critiquing the proposal.",
+                complete_action="debate_critique_complete",
+                update_task=False
+            )
             
             # 4. Agent A refines based on critique
-            refinement_prompt = f"Refine your initial output for the task: '{task['description']}' based on this critique: {json.dumps(critique_res['data'])}"
-            final_res = await inst_a.run(refinement_prompt, [])
+            task_refinement = task.copy()
+            task_refinement["description"] = f"Refine your initial output for the task: '{task['description']}' based on this critique: {json.dumps(critique_res['data'])}"
             
-            # 5. Save final result
-            supabase.table("tasks").update({
-                "status": "done",
-                "output_data": {
+            final_res, _ = await AgentRunnerService.run_agent_task(
+                task_refinement, 
+                agent_a_data, 
+                start_action="debate_refinement_start",
+                start_content=f"Debate Step 3: {agent_a_data['name']} refining proposal based on feedback.",
+                complete_action="debate_refinement_complete",
+                update_task=False
+            )
+            
+            # 5. Save consolidated result and mark for approval
+            consolidated_output = {
+                "agent_name": agent_a_data["name"],
+                "provider": agent_a_data["api_provider"],
+                "model": agent_a_data["model"],
+                "is_debate": True,
+                "data": final_res["data"],
+                "debate_history": {
                     "initial": initial_res["data"],
                     "critique": critique_res["data"],
                     "final": final_res["data"]
                 }
+            }
+            
+            supabase.table("tasks").update({
+                "status": "awaiting_approval",
+                "output_data": consolidated_output
             }).eq("id", task_id).execute()
             
             logger.info(f"Debate completed for task {task_id}")
             
         except Exception as e:
             logger.error(f"Debate failed: {str(e)}")
-            supabase.table("tasks").update({"status": "failed"}).eq("id", task_id).execute()
+            supabase.table("tasks").update({
+                "status": "failed",
+                "output_data": {"error": str(e)}
+            }).eq("id", task_id).execute()
+            
+            # LOG ERROR TO AGENT CONSOLE
+            supabase.table("agent_logs").insert({
+                "task_id": task_id,
+                "action": "debate_failed",
+                "content": f"DEBATE ERROR: {str(e)}"
+            }).execute()
 
     async def run_project(self, project_id: str):
         """
@@ -218,8 +267,12 @@ class OrchestratorService:
             or []
         )
 
-        # Automatic Decomposition: If no tasks exist, try to decompose the project first
-        if not tasks:
+        # Check if ANY tasks exist for this project (regardless of status) to avoid re-decomposing
+        all_tasks_res = supabase.table("tasks").select("id", count="exact").eq("project_id", project_id).limit(1).execute()
+        has_any_tasks = all_tasks_res.count > 0 if all_tasks_res.count is not None else len(all_tasks_res.data) > 0
+
+        # Automatic Decomposition: Only if no tasks exist AT ALL
+        if not has_any_tasks:
             logger.info(f"No tasks found for project {project_id}. Triggering auto-decomposition.")
             await self.decompose_project(project_id)
             # Re-fetch tasks after decomposition
@@ -387,29 +440,68 @@ class OrchestratorService:
         if incomplete:
             raise ValueError(f"Final report is available after all tasks are approved. Pending tasks: {len(incomplete)}")
 
+        # 0. Header and Description
         report_title = REPORT_VARIANTS[variant]["title"]
         lines = [
             f"# {report_title}: {project['name']}",
             "",
-            "## Project Brief",
-            project.get("description") or "No project description provided.",
+            "## Project Overview",
+            project.get("description") or "No description provided.",
+            ""
         ]
 
+        # Add Context if exists
         if project.get("context"):
-            lines.extend(["", "## Context", project["context"]])
+            lines.extend(["## Context", project["context"], ""])
 
-        lines.extend(["", "## Approved Work Summary"])
+        lines.extend(["## Execution Summary", ""])
+        
+        # We will add the tabular summary later in the UI or via charts, 
+        # but for the text report, we include the approved work summary.
+        lines.extend(["## Approved Work Summary", ""])
 
         for index, task in enumerate(tasks, start=1):
             lines.extend([
-                "",
                 f"### {index}. {task['title']}",
                 task.get("description") or "No task description provided.",
                 "",
-                _format_output_for_report(task.get("output_data"))
+                _format_output_for_report(task.get("output_data")),
+                ""
             ])
 
+        # Final Conclusion Generation
+        conclusion = (
+            "Based on the approved task outputs, the project has successfully established a foundational framework. "
+            "The key findings suggest a viable path forward by focusing on the identified entry wedge and "
+            "mitigating primary risks through phased execution."
+        )
+
+        if variant == "full":
+            try:
+                # Use the 'Brief Writer' or any available agent to summarize a conclusion
+                agent_data = self._select_report_agent(project, "brief")
+                if agent_data:
+                    agent = AgentFactory.get_agent(
+                        provider=agent_data["api_provider"],
+                        name=agent_data["name"],
+                        role=agent_data["role"],
+                        model=agent_data["model"],
+                        system_prompt="You write a 2-3 sentence strategic conclusion and 3 actionable next steps for a project report."
+                    )
+                    report_so_far = "\n".join(lines)
+                    res = await agent.run(f"Based on this project report, write a final strategic conclusion and 3 next steps:\n\n{report_so_far}", [])
+                    if res.get("status") != "error":
+                        data = res.get("data")
+                        if isinstance(data, str):
+                            conclusion = data
+                        elif isinstance(data, dict):
+                            conclusion = data.get("conclusion") or data.get("content") or str(data)
+            except Exception as exc:
+                logger.warning(f"Failed to generate dynamic conclusion: {exc}")
+
         lines.extend([
+            "## Strategic Conclusion",
+            conclusion,
             "",
             "## Completion Status",
             f"All {len(tasks)} tasks are approved. Project status: completed."
@@ -477,38 +569,54 @@ class OrchestratorService:
                 system_prompt=planner_agent_data.get("system_prompt")
             )
 
-        prompt = f"""Decompose the following project into 3-5 clear, actionable tasks.
+        prompt = f"""Decompose the following project into 3-5 clear, actionable implementation tasks.
 Project Name: {project['name']}
 Description: {project['description']}
 Context: {project.get('context', 'None')}
 
-Return ONLY a valid JSON array of objects.
-Each object MUST have exactly these keys: 'title', 'description', and 'priority' (integer 1-5).
-IMPORTANT: Do not wrap the list in an object. Return a flat [{{...}}, {{...}}] array.
+### Output Requirements:
+You MUST return a valid JSON array of objects. Each object represents a task.
+Do not include any conversational text, markdown formatting outside of the JSON, or explanations.
+
+### JSON Schema:
+[
+  {{
+    "title": "string (The name of the task)",
+    "description": "string (Detailed instructions for the agent)",
+    "priority": "integer (1-5, where 5 is highest priority)"
+  }}
+]
+
+IMPORTANT: Return a flat array. Do not wrap it in a parent 'tasks' object.
 """
 
         try:
             result = await planner.run(prompt, [])
-            # Some cleaning might be needed if agent returns markdown
-            content = result["data"]
-            tasks_data = planner._parse_json_output(content) if isinstance(content, str) else content
+            tasks_data = result.get("data")
 
-            # Ensure tasks_data is a list
+            # Handle common LLM wrapping patterns
             if isinstance(tasks_data, dict):
-                # If agent wrapped it in {"tasks": [...]}, extract it
                 if "tasks" in tasks_data and isinstance(tasks_data["tasks"], list):
                     tasks_data = tasks_data["tasks"]
                 else:
-                    # Single task as object, wrap in list
                     tasks_data = [tasks_data]
             
             if not isinstance(tasks_data, list):
                 raise ValueError(f"Agent returned invalid format: {type(tasks_data)}. Expected list or dict.")
 
+            # Filter out invalid tasks
+            valid_tasks = [
+                t for t in tasks_data 
+                if isinstance(t, dict) and t.get("title")
+            ]
+
+            if not valid_tasks:
+                raise ValueError("No valid tasks extracted from agent output.")
+
             # Insert tasks
             from .project_service import project_service
-            await project_service.add_tasks_to_project(project_id, tasks_data)
-            logger.info(f"Auto-decomposed project {project_id} into {len(tasks_data)} tasks.")
+            await project_service.add_tasks_to_project(project_id, valid_tasks)
+            logger.info(f"Auto-decomposed project {project_id} into {len(valid_tasks)} tasks.")
         except Exception as e:
             logger.error(f"Project decomposition failed: {e}")
 

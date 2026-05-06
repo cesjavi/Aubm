@@ -27,6 +27,9 @@ import SettingsView from './components/SettingsView';
 import Dashboard from './components/Dashboard';
 import ProjectDetail from './components/ProjectDetail';
 import AgentsView from './components/AgentsView';
+import AgentConsole from './components/AgentConsole';
+import SplashScreen from './components/SplashScreen';
+import { useEffect } from 'react';
 
 type AppTab = 'dashboard' | 'project-detail' | 'agents' | 'marketplace' | 'debate' | 'voice' | 'spatial' | 'monitoring' | 'new-project' | 'settings';
 
@@ -35,6 +38,12 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<AppTab>('dashboard');
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(() => typeof window === 'undefined' || window.innerWidth >= 900);
+  const [showSplash, setShowSplash] = useState(true);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setShowSplash(false), 2500);
+    return () => clearTimeout(timer);
+  }, []);
 
   const navigateTo = (tab: AppTab) => {
     setActiveTab(tab);
@@ -43,7 +52,7 @@ const App: React.FC = () => {
     }
   };
 
-  if (loading) return null; // Or a premium loading spinner
+  if (loading || showSplash) return <AnimatePresence><SplashScreen /></AnimatePresence>;
   if (!session) return <Login />;
 
   return (
@@ -186,18 +195,8 @@ const App: React.FC = () => {
           {activeTab === 'settings' && <SettingsView />}
         </section>
 
-        {/* Real-time Console Placeholder */}
-        <section className="glass-panel app-console">
-          <div style={{ padding: 'var(--space-sm) var(--space-md)', borderBottom: '1px solid var(--glass-border)', display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
-            <Terminal size={16} color="var(--accent)" />
-            <span style={{ fontSize: '0.8rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em' }}>Agent Console</span>
-          </div>
-          <div style={{ padding: 'var(--space-md)', height: '150px', overflowY: 'auto', fontFamily: 'monospace', fontSize: '0.85rem', color: 'var(--accent)' }}>
-            <div>[System] Initializing orchestrator...</div>
-            <div>[Orchestrator] Scanning for pending tasks...</div>
-            <div>[Agent: Researcher] Starting web search for "Market trends 2026"...</div>
-          </div>
-        </section>
+        {/* Real-time Agent Console */}
+        <AgentConsole />
       </main>
     </div>
   );

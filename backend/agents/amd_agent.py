@@ -22,20 +22,12 @@ class AMDAgent(BaseAgent):
         self.max_tokens = self.provider_config.get("max_tokens", 4096)
 
     async def run(self, task_description: str, context: List[Dict[str, Any]], use_tools: bool = False, extra_context: str = "") -> Dict[str, Any]:
-        try:
-            response = await self.client.chat.completions.create(
-                model=self.model,
-                messages=self._build_chat_messages(task_description, context, extra_context),
-                response_format={"type": "json_object"},
-                temperature=self.temperature,
-                max_tokens=self.max_tokens
-            )
-
-            return self._result("amd", response.choices[0].message.content or "")
-        except Exception as e:
-            return {
-                "agent_name": self.name,
-                "provider": "amd",
-                "status": "error",
-                "error": str(e)
-            }
+        return await self._run_openai_compatible(
+            provider="amd",
+            create_fn=self.client.chat.completions.create,
+            task_description=task_description,
+            context=context,
+            use_tools=use_tools,
+            extra_context=extra_context,
+            response_format={"type": "json_object"}
+        )

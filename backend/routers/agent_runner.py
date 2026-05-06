@@ -11,14 +11,14 @@ def update_task_status(task_id: str, status: str):
         supabase.table("tasks")
         .update({"status": status})
         .eq("id", task_id)
-        .select("id,project_id,status")
-        .single()
         .execute()
     )
     if not result.data:
         raise HTTPException(status_code=404, detail="Task not found or status was not updated")
 
-    project_id = result.data.get("project_id")
+    task_data = result.data[0]
+
+    project_id = task_data.get("project_id")
     if project_id:
         task_result = (
             supabase.table("tasks")
@@ -32,7 +32,7 @@ def update_task_status(task_id: str, status: str):
         elif status != "done":
             supabase.table("projects").update({"status": "active"}).eq("id", project_id).execute()
 
-    return result.data
+    return task_data
 
 @router.post("/{task_id}/run")
 async def run_task(task_id: str, background_tasks: BackgroundTasks):
@@ -75,3 +75,29 @@ async def approve_task(task_id: str):
 async def reject_task(task_id: str):
     task = update_task_status(task_id, "todo")
     return {"message": "Task rejected", "task": task}
+@router.post("/project/{project_id}/approve-all")
+async def approve_all_tasks(project_id: str):
+    """
+    Approves all tasks in a project that are awaiting approval.
+    """
+    # 1. Update tasks
+    result = (
+        supabase.table("tasks")
+        .update({"status": "done"})
+        .eq("project_id", project_id)
+        .eq("status", "awaiting_approval")
+        .execute()
+    )
+    
+    # 2. Check if all tasks in project are now done
+    task_result = (
+        supabase.table("tasks")
+        .select("status")
+        .eq("project_id", project_id)
+        .execute()
+    )
+    tasks = task_result.data or []
+    if tasks and all(task.get("status") == "done" for task in tasks):
+        supabase.table("projects").update({"status": "completed"}).eq("id", project_id).execute()
+    
+    return {"message": f"Approved {len(result.data)} tasks", "count": len(result.data)}

@@ -699,9 +699,11 @@
   appearance: auto;
 }
 
-.project-form select option {
-  color: #111827;
-  background: #ffffff;
+.project-form select option,
+.settings-section select option,
+select option {
+  color: white;
+  background: #111827;
 }
 
 .project-form input:focus,
@@ -725,14 +727,23 @@
 }
 
 .inline-status {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: var(--space-sm);
-  padding: var(--space-md);
-  border: 1px solid var(--glass-border);
+  padding: 0.6rem 1rem;
+  background: rgba(110, 89, 255, 0.08);
+  border: 1px solid rgba(110, 89, 255, 0.2);
   border-radius: var(--radius-md);
-  background: rgba(255,255,255,0.04);
-  color: var(--text-dim);
+  margin-bottom: var(--space-md);
+  color: var(--text-h);
+  font-size: 0.85rem;
+  font-weight: 500;
+  animation: slideDown 0.3s ease;
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .settings-page {
@@ -776,10 +787,6 @@
   color-scheme: dark;
 }
 
-.settings-section select option {
-  color: #111827;
-  background: #ffffff;
-}
 
 .settings-section-title {
   display: flex;
@@ -850,6 +857,17 @@
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-md);
   background: rgba(255,255,255,0.04);
+}
+
+.task-row.clickable {
+  cursor: pointer;
+}
+
+.task-row.clickable:hover {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: var(--accent);
+  transform: translateX(4px);
+  transition: all 0.2s ease;
 }
 
 .task-row p {
