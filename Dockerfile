@@ -26,6 +26,7 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
+COPY VERSION VERSION
 COPY backend/requirements.txt backend/requirements.txt
 RUN pip install --no-cache-dir -r backend/requirements.txt
 

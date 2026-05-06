@@ -50,6 +50,18 @@ class AgentRunnerService:
                 .execute()
             context = context_res.data if context_res.data else []
 
+            project_data = task.get("project")
+            if not isinstance(project_data, dict):
+                project_res = (
+                    supabase.table("projects")
+                    .select("name,description,context")
+                    .eq("id", project_id)
+                    .single()
+                    .execute()
+                )
+                project_data = project_res.data if project_res and project_res.data else {}
+            quality_task = {**task, "project": project_data}
+
             extra_context = ""
             if include_semantic_context:
                 extra_context = await semantic_backprop.get_project_context(project_id, task_id)
@@ -99,7 +111,7 @@ class AgentRunnerService:
             # 4. Execute Run with timing
             start_time = time.time()
             task_instructions = task.get("description") or task["title"]
-            task_instructions = f"{task_instructions}\n\n{build_quality_instructions(task)}"
+            task_instructions = f"{task_instructions}\n\n{build_quality_instructions(quality_task)}"
             result = await agent.run(task_instructions, context, extra_context=extra_context)
             duration = time.time() - start_time
 
@@ -115,7 +127,7 @@ class AgentRunnerService:
                     result["security_warning"] = f"Output sanitized: suspicious pattern '{pattern}' detected."
                     # We don't block yet, but we flag it.
 
-            quality_review = validate_output(task, result)
+            quality_review = validate_output(quality_task, result)
             result["quality_review"] = quality_review
 
             # 6. Save to Cache

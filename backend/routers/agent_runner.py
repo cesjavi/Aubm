@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from services.supabase_service import supabase
 from services.agent_runner_service import AgentRunnerService
+from services.output_quality import report_text_from_output
 import logging
 
 router = APIRouter()
@@ -10,10 +11,15 @@ logger = logging.getLogger("uvicorn")
 def _assert_task_quality(task: dict):
     output_data = task.get("output_data") or {}
     if not isinstance(output_data, dict):
-        return
+        raise HTTPException(status_code=400, detail="Task output is missing or malformed.")
+    if output_data.get("error"):
+        raise HTTPException(status_code=400, detail=f"Task execution failed: {output_data['error']}")
+    rendered = report_text_from_output(output_data).strip()
+    if not rendered or rendered in ("{}", "[]"):
+        raise HTTPException(status_code=400, detail="Task has no usable output to approve.")
     quality_review = output_data.get("quality_review")
     if not quality_review:
-        return
+        raise HTTPException(status_code=400, detail="Task output is missing quality validation.")
     if quality_review.get("approved"):
         return
     reasons = quality_review.get("fail_reasons") or ["Task output failed quality validation."]

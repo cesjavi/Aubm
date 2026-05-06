@@ -68,6 +68,18 @@ def _format_output_for_report(output_data) -> str:
 
     return clean_report_text(dedupe_lines("\n".join(_format_value_for_report(primary))))
 
+
+def _has_usable_output(output_data) -> bool:
+    if not output_data:
+        return False
+    if isinstance(output_data, dict):
+        if output_data.get("error"):
+            return False
+        primary = output_data.get("data")
+        if primary in (None, "", [], {}):
+            return False
+    return True
+
 def _output_text(output_data) -> str:
     return _format_output_for_report(output_data).lower()
 
@@ -422,6 +434,12 @@ class OrchestratorService:
         excluded: list[dict] = []
         for task in tasks:
             output_data = task.get("output_data") or {}
+            if not _has_usable_output(output_data):
+                excluded.append({
+                    "title": task.get("title", "Untitled task"),
+                    "reasons": ["Task has no usable approved output."]
+                })
+                continue
             quality_review = output_data.get("quality_review") if isinstance(output_data, dict) else None
             if quality_review and not quality_review.get("approved", False):
                 excluded.append({
@@ -502,9 +520,9 @@ class OrchestratorService:
             lines.extend(["## Excluded Content", ""])
             for excluded in excluded_tasks:
                 lines.append(f"- Excluded task output: {excluded['title']} ({'; '.join(excluded['reasons'])})")
-            for excluded_line in report_exclusions[:25]:
+            for excluded_line in list(dict.fromkeys(report_exclusions))[:10]:
                 if excluded_line:
-                    lines.append(f"- Removed low-quality line: {excluded_line}")
+                    lines.append(f"- {excluded_line}")
             lines.append("")
 
         # Final Conclusion Generation
@@ -542,7 +560,7 @@ class OrchestratorService:
             conclusion,
             "",
             "## Completion Status",
-            f"All {len(tasks)} tasks are approved. {len(curated_tasks)} task outputs passed final quality validation. Project status: completed."
+            f"{len(tasks)} tasks reached done status. {len(curated_tasks)} task outputs passed final quality validation. {len(excluded_tasks)} task outputs were excluded from the final report."
         ])
 
         supabase.table("projects").update({"status": "completed"}).eq("id", project_id).execute()

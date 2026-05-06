@@ -7,10 +7,20 @@ from pathlib import Path
 from dotenv import load_dotenv
 import sentry_sdk
 
+
+def _load_app_version() -> str:
+    version_file = Path(__file__).resolve().parent.parent / "VERSION"
+    if version_file.exists():
+        value = version_file.read_text(encoding="utf-8").strip()
+        if value:
+            return value
+    return os.getenv("APP_VERSION", "0.7.0")
+
+
 # Load environment variables
 load_dotenv()
 FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
-APP_VERSION = (Path(__file__).resolve().parent.parent / "VERSION").read_text(encoding="utf-8").strip()
+APP_VERSION = _load_app_version()
 
 # Sentry Initialization
 SENTRY_DSN = os.getenv("SENTRY_DSN")
