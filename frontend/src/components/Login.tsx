@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { supabase } from '../services/supabase';
-import { LogIn, Mail, Lock, Bot } from 'lucide-react';
+import { LogIn, Mail, Lock, Bot, Globe, GitBranch } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 const Login: React.FC = () => {
@@ -90,8 +90,27 @@ const Login: React.FC = () => {
           </button>
         </form>
 
+        {/* Social Login - Hidden for now but code preserved 
+        <div style={{ margin: 'var(--space-lg) 0', display: 'flex', alignItems: 'center', gap: 'var(--space-md)' }}>
+          <div style={{ flex: 1, height: '1px', background: 'var(--glass-border)' }}></div>
+          <span style={{ fontSize: '0.8rem', color: 'var(--text-dim)' }}>OR CONTINUE WITH</span>
+          <div style={{ flex: 1, height: '1px', background: 'var(--glass-border)' }}></div>
+        </div>
+
+        <div className="auth-provider-grid">
+          <button className="btn btn-glass" onClick={() => (window as any).handleSSOLogin?.('google')}>
+            <Globe size={18} />
+            Google
+          </button>
+          <button className="btn btn-glass" onClick={() => (window as any).handleSSOLogin?.('github')}>
+            <GitBranch size={18} />
+            GitHub
+          </button>
+        </div>
+        */}
+
         <div style={{ marginTop: 'var(--space-lg)', fontSize: '0.85rem', color: 'var(--text-dim)' }}>
-          Email and password authentication enabled.
+          Enterprise authentication enabled.
         </div>
       </motion.div>
     </div>

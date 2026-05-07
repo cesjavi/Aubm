@@ -69,20 +69,46 @@ def _format_value_for_report(value, level: int = 0) -> list[str]:
 
 
 def _extract_json_payload(text: str):
+    if not text:
+        return None
+        
     stripped = text.strip()
+    
+    # 1. Try standard block extraction
     if stripped.startswith("```"):
-        stripped = stripped.strip("`")
-        if stripped.lower().startswith("json"):
-            stripped = stripped[4:].strip()
+        cleaned = stripped.strip("`")
+        if cleaned.lower().startswith("json"):
+            cleaned = cleaned[4:].strip()
+        try:
+            return json.loads(cleaned)
+        except Exception:
+            pass # Fallback to regex
+
+    # 2. Try direct parsing
     try:
         return json.loads(stripped)
     except Exception:
-        match = re.search(r"```json\s*(.*?)\s*```", text, re.IGNORECASE | re.DOTALL)
+        pass
+
+    # 3. Robust Regex Search (find content between first { and last })
+    # This is the "Repair Layer" for noisy LLM outputs
+    try:
+        # Search for anything starting with { and ending with }
+        # across multiple lines
+        match = re.search(r'(\{.*\})', stripped, re.DOTALL)
         if match:
-            try:
-                return json.loads(match.group(1))
-            except Exception:
-                return None
+            return json.loads(match.group(1))
+    except Exception:
+        pass
+
+    # 4. Specific Markdown Block Search
+    match = re.search(r"```json\s*(.*?)\s*```", text, re.IGNORECASE | re.DOTALL)
+    if match:
+        try:
+            return json.loads(match.group(1))
+        except Exception:
+            pass
+            
     return None
 
 def _format_output_for_report(output_data) -> str:

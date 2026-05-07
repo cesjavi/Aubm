@@ -3,6 +3,7 @@ import { FolderOpen, Play, RefreshCw, Search, SlidersHorizontal, Trash2, X } fro
 import { motion } from 'framer-motion';
 import { supabase } from '../services/supabase';
 import { useAuth } from '../context/useAuth';
+import StatusBadge from './common/StatusBadge';
 
 interface Project {
   id: string;
@@ -299,25 +300,5 @@ const ProjectCard: React.FC<{ name: string; status: string; tasksDone: number; t
   );
 };
 
-const StatusBadge: React.FC<{ status: string }> = ({ status }) => {
-  const normalized = status.replace('_', ' ');
-  const color = status === 'active' ? 'var(--success)' : status === 'completed' ? 'var(--info)' : 'var(--text-muted)';
-
-  return (
-    <span style={{
-      fontSize: '0.7rem',
-      padding: '0.2rem 0.6rem',
-      borderRadius: 'var(--radius-full)',
-      background: 'rgba(255,255,255,0.05)',
-      border: `1px solid ${color}`,
-      color,
-      textTransform: 'uppercase',
-      fontWeight: 700,
-      letterSpacing: '0.05em'
-    }}>
-      {normalized}
-    </span>
-  );
-};
 
 export default Dashboard;
