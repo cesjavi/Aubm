@@ -28,6 +28,7 @@ CREATE POLICY "Admins can update all profiles" ON public.profiles
     USING ( public.is_admin_check() )
     WITH CHECK ( public.is_admin_check() );
 
--- 4. Grant access to the function
+-- 4. Restrict and grant access to the function
+REVOKE ALL ON FUNCTION public.is_admin_check() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.is_admin_check() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.is_admin_check() TO service_role;

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Activity, AlertTriangle, Database, RefreshCw, Server, ShieldCheck } from 'lucide-react';
+import { Activity, AlertTriangle, Clock, Database, RefreshCw, Server, ShieldCheck } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { supabase } from '../services/supabase';
 import { getApiUrl } from '../services/runtimeConfig';
@@ -21,7 +21,12 @@ const emptySummary: MonitoringSummary = {
     agents: 0,
     task_runs: 0,
     failed_tasks: 0,
-    pending_reviews: 0
+    pending_reviews: 0,
+    queued_tasks: 0,
+    in_progress_tasks: 0,
+    stale_leases: 0,
+    delayed_retries: 0,
+    active_workers: 0
   },
   timestamp: new Date().toISOString()
 };
@@ -31,25 +36,32 @@ const MonitoringView: React.FC = () => {
   const [loading, setLoading] = useState(false);
 
   const fetchFallbackSummary = useCallback(async (): Promise<MonitoringSummary> => {
-    const [projects, tasks, agents, runs, failed, reviews] = await Promise.all([
+    const [projects, tasks, agents, runs, failed, reviews, queued, inProgress] = await Promise.all([
       supabase.from('projects').select('id', { count: 'exact', head: true }),
       supabase.from('tasks').select('id', { count: 'exact', head: true }),
       supabase.from('agents').select('id', { count: 'exact', head: true }),
       supabase.from('task_runs').select('id', { count: 'exact', head: true }),
       supabase.from('tasks').select('id', { count: 'exact', head: true }).eq('status', 'failed'),
-      supabase.from('tasks').select('id', { count: 'exact', head: true }).eq('status', 'awaiting_approval')
+      supabase.from('tasks').select('id', { count: 'exact', head: true }).eq('status', 'awaiting_approval'),
+      supabase.from('tasks').select('id', { count: 'exact', head: true }).eq('status', 'queued'),
+      supabase.from('tasks').select('id', { count: 'exact', head: true }).eq('status', 'in_progress')
     ]);
 
     return {
       status: 'ok',
-      checks: { api: 'unreachable', database: 'ok' },
+      checks: { api: 'unreachable', database: 'ok', workers: 'unavailable' },
       counts: {
         projects: projects.count ?? 0,
         tasks: tasks.count ?? 0,
         agents: agents.count ?? 0,
         task_runs: runs.count ?? 0,
         failed_tasks: failed.count ?? 0,
-        pending_reviews: reviews.count ?? 0
+        pending_reviews: reviews.count ?? 0,
+        queued_tasks: queued.count ?? 0,
+        in_progress_tasks: inProgress.count ?? 0,
+        stale_leases: 0,
+        delayed_retries: 0,
+        active_workers: 0
       },
       timestamp: new Date().toISOString(),
       error: 'Backend monitoring endpoint unavailable; using Supabase fallback.'
@@ -75,7 +87,7 @@ const MonitoringView: React.FC = () => {
     refresh();
   }, [refresh]);
 
-  const degraded = summary.status !== 'ok' || Object.values(summary.checks).some((check) => check === 'error');
+  const degraded = summary.status !== 'ok' || Object.values(summary.checks).some((check) => check === 'error' || check === 'warning');
 
   return (
     <div className="monitoring-page animate-fade-in">
@@ -109,6 +121,11 @@ const MonitoringView: React.FC = () => {
         <MetricCard icon={<RefreshCw size={20} />} label="Runs" value={summary.counts.task_runs} />
         <MetricCard icon={<AlertTriangle size={20} />} label="Failed" value={summary.counts.failed_tasks} danger />
         <MetricCard icon={<ShieldCheck size={20} />} label="Reviews" value={summary.counts.pending_reviews} />
+        <MetricCard icon={<Clock size={20} />} label="Queued" value={summary.counts.queued_tasks} />
+        <MetricCard icon={<Activity size={20} />} label="Running" value={summary.counts.in_progress_tasks} />
+        <MetricCard icon={<Server size={20} />} label="Workers" value={summary.counts.active_workers} danger={summary.counts.queued_tasks > 0 && summary.counts.active_workers === 0} />
+        <MetricCard icon={<Clock size={20} />} label="Delayed" value={summary.counts.delayed_retries} />
+        <MetricCard icon={<AlertTriangle size={20} />} label="Stale Leases" value={summary.counts.stale_leases} danger={summary.counts.stale_leases > 0} />
       </div>
 
       <div className="glass-panel monitoring-checks">

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { FolderOpen, Play, RefreshCw, Trash2 } from 'lucide-react';
+import { FolderOpen, Play, RefreshCw, Search, SlidersHorizontal, Trash2, X } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { supabase } from '../services/supabase';
 import { useAuth } from '../context/useAuth';
@@ -29,6 +29,10 @@ const Dashboard: React.FC<DashboardProps> = ({ onNewProject, onOpenProject }) =>
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [progressFilter, setProgressFilter] = useState('all');
+  const [sortBy, setSortBy] = useState('newest');
 
   const loadDashboard = useCallback(async () => {
     if (!user) return;
@@ -92,6 +96,52 @@ const Dashboard: React.FC<DashboardProps> = ({ onNewProject, onOpenProject }) =>
     }, {});
   }, [tasks]);
 
+  const filteredProjects = useMemo(() => {
+    const normalizedSearch = searchTerm.trim().toLowerCase();
+
+    return projects
+      .filter((project) => {
+        if (statusFilter !== 'all' && project.status !== statusFilter) return false;
+
+        if (normalizedSearch) {
+          const searchableText = `${project.name} ${project.description ?? ''}`.toLowerCase();
+          if (!searchableText.includes(normalizedSearch)) return false;
+        }
+
+        const counts = taskCounts[project.id] ?? { done: 0, total: 0 };
+        const progress = counts.total > 0 ? counts.done / counts.total : 0;
+
+        if (progressFilter === 'not_started') return counts.done === 0;
+        if (progressFilter === 'in_progress') return progress > 0 && progress < 1;
+        if (progressFilter === 'completed') return counts.total > 0 && progress === 1;
+        if (progressFilter === 'no_tasks') return counts.total === 0;
+
+        return true;
+      })
+      .sort((a, b) => {
+        if (sortBy === 'name') return a.name.localeCompare(b.name);
+        if (sortBy === 'oldest') return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+        if (sortBy === 'progress') {
+          const aCounts = taskCounts[a.id] ?? { done: 0, total: 0 };
+          const bCounts = taskCounts[b.id] ?? { done: 0, total: 0 };
+          const aProgress = aCounts.total > 0 ? aCounts.done / aCounts.total : 0;
+          const bProgress = bCounts.total > 0 ? bCounts.done / bCounts.total : 0;
+          return bProgress - aProgress;
+        }
+
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      });
+  }, [progressFilter, projects, searchTerm, sortBy, statusFilter, taskCounts]);
+
+  const hasActiveFilters = Boolean(searchTerm.trim()) || statusFilter !== 'all' || progressFilter !== 'all' || sortBy !== 'newest';
+
+  const clearFilters = () => {
+    setSearchTerm('');
+    setStatusFilter('all');
+    setProgressFilter('all');
+    setSortBy('newest');
+  };
+
   return (
     <>
       <div className="page-heading dashboard-heading">
@@ -113,6 +163,53 @@ const Dashboard: React.FC<DashboardProps> = ({ onNewProject, onOpenProject }) =>
 
       {error && <div className="inline-status">{error}</div>}
 
+      {projects.length > 0 && (
+        <div className="dashboard-controls glass-panel">
+          <div className="dashboard-search">
+            <Search size={17} />
+            <input
+              value={searchTerm}
+              onChange={(event) => setSearchTerm(event.target.value)}
+              placeholder="Search projects..."
+              aria-label="Search projects"
+            />
+          </div>
+
+          <div className="dashboard-filter-group">
+            <SlidersHorizontal size={17} />
+            <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} aria-label="Filter by status">
+              <option value="all">All statuses</option>
+              <option value="active">Active</option>
+              <option value="completed">Completed</option>
+              <option value="archived">Archived</option>
+            </select>
+            <select value={progressFilter} onChange={(event) => setProgressFilter(event.target.value)} aria-label="Filter by progress">
+              <option value="all">All progress</option>
+              <option value="not_started">Not started</option>
+              <option value="in_progress">In progress</option>
+              <option value="completed">Completed tasks</option>
+              <option value="no_tasks">No tasks</option>
+            </select>
+            <select value={sortBy} onChange={(event) => setSortBy(event.target.value)} aria-label="Sort projects">
+              <option value="newest">Newest first</option>
+              <option value="oldest">Oldest first</option>
+              <option value="name">Name A-Z</option>
+              <option value="progress">Most progress</option>
+            </select>
+          </div>
+
+          <div className="dashboard-results">
+            <span>{filteredProjects.length}/{projects.length} shown</span>
+            {hasActiveFilters && (
+              <button className="btn btn-glass btn-sm" type="button" onClick={clearFilters}>
+                <X size={14} />
+                Clear
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {!loading && projects.length === 0 && (
         <div className="glass-panel empty-state">
           <FolderOpen size={32} color="var(--accent)" />
@@ -124,8 +221,19 @@ const Dashboard: React.FC<DashboardProps> = ({ onNewProject, onOpenProject }) =>
         </div>
       )}
 
+      {!loading && projects.length > 0 && filteredProjects.length === 0 && (
+        <div className="glass-panel empty-state">
+          <Search size={32} color="var(--accent)" />
+          <h3>No matching projects</h3>
+          <p>Adjust the search or filters to show more projects.</p>
+          <button className="btn btn-glass" onClick={clearFilters}>
+            Clear Filters
+          </button>
+        </div>
+      )}
+
       <div className="dashboard-grid">
-        {projects.map((project) => {
+        {filteredProjects.map((project) => {
           const counts = taskCounts[project.id] ?? { done: 0, total: 0 };
           return (
             <ProjectCard
@@ -155,15 +263,15 @@ const ProjectCard: React.FC<{ name: string; status: string; tasksDone: number; t
   const progress = tasksTotal > 0 ? (tasksDone / tasksTotal) * 100 : 0;
 
   return (
-    <motion.div whileHover={{ y: -5 }} className="glass-panel project-card" style={{ padding: 'var(--space-lg)', position: 'relative', overflow: 'hidden' }}>
-      <div className="project-card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 'var(--space-md)' }}>
-        <h3 style={{ fontSize: '1.25rem', margin: 0, flex: 1, lineHeight: 1.2 }}>{name}</h3>
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexShrink: 0 }}>
+    <motion.div whileHover={{ y: -5 }} className="glass-panel project-card">
+      <div className="project-card-header">
+        <h3>{name}</h3>
+        <div className="project-card-actions">
           <StatusBadge status={status} />
           <button 
             className="btn btn-icon" 
             onClick={(e) => { e.stopPropagation(); onDelete(); }}
-            style={{ color: 'var(--danger)', opacity: 0.6, padding: '4px' }}
+            style={{ color: 'var(--danger)', opacity: 0.6 }}
             title="Delete Project"
           >
             <Trash2 size={16} />
@@ -173,17 +281,17 @@ const ProjectCard: React.FC<{ name: string; status: string; tasksDone: number; t
 
       {/* Description removed as requested for a cleaner layout */}
 
-      <div style={{ marginBottom: 'var(--space-lg)' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: 'var(--space-xs)' }}>
-          <span style={{ color: 'var(--text-dim)' }}>Tasks Progress</span>
+      <div className="project-card-progress">
+        <div className="project-card-progress-label">
+          <span>Tasks Progress</span>
           <span>{tasksDone}/{tasksTotal}</span>
         </div>
-        <div style={{ height: '6px', width: '100%', background: 'rgba(255,255,255,0.1)', borderRadius: '3px' }}>
-          <div style={{ height: '100%', width: `${progress}%`, background: 'var(--accent)', borderRadius: '3px', boxShadow: '0 0 10px var(--accent)' }} />
+        <div className="project-card-progress-track">
+          <div className="project-card-progress-fill" style={{ width: `${progress}%` }} />
         </div>
       </div>
 
-      <button className="btn btn-primary" style={{ width: '100%' }} onClick={onOpen}>
+      <button className="btn btn-primary project-card-open" onClick={onOpen}>
         <Play size={16} fill="white" />
         Open Project
       </button>

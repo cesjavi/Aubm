@@ -69,6 +69,7 @@ const SpatialDashboard: React.FC<SpatialDashboardProps> = ({ selectedProjectId, 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [compact, setCompact] = useState(false);
   const [edgeLines, setEdgeLines] = useState<EdgeLine[]>([]);
+  const [planeSize, setPlaneSize] = useState({ width: 900, height: 430 });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reloadNonce, setReloadNonce] = useState(0);
@@ -190,10 +191,13 @@ const SpatialDashboard: React.FC<SpatialDashboardProps> = ({ selectedProjectId, 
     );
   }, [visibleTasks]);
 
-  const tasksByStage = stageOrder.map((status) => ({
-    status,
-    tasks: visibleTasks.filter((task) => task.status === status)
-  }));
+  const tasksByStage = useMemo(
+    () => stageOrder.map((status) => ({
+      status,
+      tasks: visibleTasks.filter((task) => task.status === status)
+    })),
+    [visibleTasks]
+  );
 
   useEffect(() => {
     const updateEdges = () => {
@@ -203,6 +207,16 @@ const SpatialDashboard: React.FC<SpatialDashboardProps> = ({ selectedProjectId, 
       }
 
       const planeBounds = planeRef.current.getBoundingClientRect();
+      const nextPlaneSize = {
+        width: planeRef.current.clientWidth || 900,
+        height: planeRef.current.clientHeight || 430
+      };
+      setPlaneSize((current) =>
+        current.width === nextPlaneSize.width && current.height === nextPlaneSize.height
+          ? current
+          : nextPlaneSize
+      );
+
       const nextLines = dependencies.flatMap((dependency) => {
         const sourceNode = nodeRefs.current[dependency.depends_on_task_id];
         const targetNode = nodeRefs.current[dependency.task_id];
@@ -298,7 +312,7 @@ const SpatialDashboard: React.FC<SpatialDashboardProps> = ({ selectedProjectId, 
           <div className={`spatial-stage ${compact ? 'is-compact' : ''}`}>
             <div className="spatial-plane" ref={planeRef}>
               {edgeLines.length > 0 && (
-                <svg className="spatial-edge-layer" viewBox={`0 0 ${planeRef.current?.clientWidth ?? 900} ${planeRef.current?.clientHeight ?? 430}`} preserveAspectRatio="none">
+                <svg className="spatial-edge-layer" viewBox={`0 0 ${planeSize.width} ${planeSize.height}`} preserveAspectRatio="none">
                   {edgeLines.map((line) => (
                     <g key={line.key}>
                       <line x1={line.fromX} y1={line.fromY} x2={line.toX} y2={line.toY} className="spatial-edge-line" />

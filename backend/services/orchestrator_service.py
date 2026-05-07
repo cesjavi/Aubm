@@ -5,6 +5,7 @@ import logging
 import re
 from services.config import settings
 from services.agent_runner_service import AgentRunnerService
+from services.audit_service import audit_service
 from services.output_quality import clean_report_text, dedupe_lines, filter_report_sections, validate_output
 
 logger = logging.getLogger("uvicorn")
@@ -125,12 +126,17 @@ def _format_conclusion_payload(data: dict) -> str:
     if isinstance(conclusion, str) and conclusion.strip():
         lines.append(conclusion.strip())
 
-    if isinstance(next_steps, list) and next_steps:
+    usable_steps = [
+        step.strip()
+        for step in next_steps
+        if isinstance(step, str) and step.strip()
+    ] if isinstance(next_steps, list) else []
+
+    if usable_steps:
         lines.append("")
         lines.append("Next steps:")
-        for step in next_steps[:5]:
-            if isinstance(step, str) and step.strip():
-                lines.append(f"- {step.strip()}")
+        for step in usable_steps[:5]:
+            lines.append(f"- {step}")
 
     return "\n".join(lines).strip() or "\n".join(_format_value_for_report(data))
 
@@ -171,7 +177,7 @@ def _build_report_charts(tasks: list[dict]) -> dict:
     risk_mentions = 0
 
     for task in tasks:
-        text = f"{task.get('title', '')} {task.get('description', '')} {_output_text(task.get('output_data'))}"
+        text = f"{task.get('title', '')} {task.get('description', '')} {_output_text(task.get('output_data'))}".lower()
         risk_mentions += sum(text.count(term) for term in categories["Risk"])
         for category, terms in categories.items():
             if any(term in text for term in terms):
@@ -201,6 +207,27 @@ def _build_report_charts(tasks: list[dict]) -> dict:
             {"label": "Risk", "value": risk_score}
         ]
     }
+
+def _format_chart_rows(title: str, rows: list[dict]) -> list[str]:
+    if not rows:
+        return [f"### {title}", "No data available.", ""]
+
+    lines = [f"### {title}"]
+    lines.extend(f"- {row['label']}: {row['value']}" for row in rows)
+    lines.append("")
+    return lines
+
+def _format_execution_summary(charts: dict, total_tasks: int, kept_task_count: int, excluded_count: int) -> list[str]:
+    lines = [
+        f"- Total tasks: {total_tasks}",
+        f"- Included outputs: {kept_task_count}",
+        f"- Excluded outputs: {excluded_count}",
+        "",
+    ]
+    lines.extend(_format_chart_rows("Scores", charts.get("scores", [])))
+    lines.extend(_format_chart_rows("Task Categories", charts.get("categories", [])))
+    lines.extend(_format_chart_rows("Priorities", charts.get("priorities", [])))
+    return lines
 
 REPORT_VARIANTS = {
     "full": {
@@ -251,6 +278,13 @@ class OrchestratorService:
 
             # Update status to in_progress
             supabase.table("tasks").update({"status": "in_progress"}).eq("id", task_id).execute()
+            await audit_service.log_action(
+                user_id=None,
+                action="debate_started",
+                agent_id=agent_a_id,
+                task_id=task_id,
+                metadata={"agent_b_id": agent_b_id, "project_id": task.get("project_id")},
+            )
             
             # 2. Agent A generates initial response
             initial_res, _ = await AgentRunnerService.run_agent_task(
@@ -307,6 +341,13 @@ class OrchestratorService:
                 "status": "awaiting_approval",
                 "output_data": consolidated_output
             }).eq("id", task_id).execute()
+            await audit_service.log_action(
+                user_id=None,
+                action="debate_completed",
+                agent_id=agent_a_id,
+                task_id=task_id,
+                metadata={"agent_b_id": agent_b_id, "project_id": task.get("project_id")},
+            )
             
             logger.info(f"Debate completed for task {task_id}")
             
@@ -316,6 +357,13 @@ class OrchestratorService:
                 "status": "failed",
                 "output_data": {"error": str(e)}
             }).eq("id", task_id).execute()
+            await audit_service.log_action(
+                user_id=None,
+                action="debate_failed",
+                agent_id=agent_a_id,
+                task_id=task_id,
+                metadata={"agent_b_id": agent_b_id, "error": str(e)},
+            )
             
             # LOG ERROR TO AGENT CONSOLE
             supabase.table("agent_logs").insert({
@@ -338,7 +386,7 @@ class OrchestratorService:
             supabase.table("tasks")
             .select("*")
             .eq("project_id", project_id)
-            .eq("status", "todo")
+            .in_("status", ["todo", "failed"])
             .order("priority", desc=True)
             .order("created_at", desc=False)
             .execute()
@@ -403,6 +451,109 @@ class OrchestratorService:
             "queued_tasks": len(tasks),
             "completed": completed,
             "failed": failed,
+        }
+
+    async def queue_project(self, project_id: str):
+        """
+        Assigns available agents and queues runnable project tasks for worker execution.
+        """
+        from services.task_queue import TaskQueueService
+
+        project = supabase.table("projects").select("*").eq("id", project_id).single().execute().data
+        if not project:
+            raise ValueError(f"Project not found: {project_id}")
+        if project.get("status") == "completed":
+            raise ValueError("Completed projects are locked and cannot be modified.")
+
+        owner_id = project.get("owner_id")
+        tasks = (
+            supabase.table("tasks")
+            .select("*")
+            .eq("project_id", project_id)
+            .in_("status", ["todo", "failed"])
+            .order("priority", desc=True)
+            .order("created_at", desc=False)
+            .execute()
+            .data
+            or []
+        )
+
+        all_tasks_res = supabase.table("tasks").select("id", count="exact").eq("project_id", project_id).limit(1).execute()
+        has_any_tasks = all_tasks_res.count > 0 if all_tasks_res.count is not None else len(all_tasks_res.data) > 0
+
+        if not has_any_tasks:
+            logger.info(f"No tasks found for project {project_id}. Triggering auto-decomposition before queueing.")
+            await self.decompose_project(project_id)
+            tasks = (
+                supabase.table("tasks")
+                .select("*")
+                .eq("project_id", project_id)
+                .in_("status", ["todo", "failed"])
+                .order("priority", desc=True)
+                .order("created_at", desc=False)
+                .execute()
+                .data
+                or []
+            )
+
+        agents = supabase.table("agents").select("*").execute().data or []
+        available_agents = [
+            agent for agent in agents
+            if agent.get("user_id") in (None, owner_id)
+        ]
+
+        queued = 0
+        failed = 0
+        skipped = 0
+
+        for task in tasks:
+            try:
+                agent_data = self._resolve_agent(task, available_agents)
+                if not agent_data:
+                    raise ValueError("No available agent for task")
+
+                if not task.get("assigned_agent_id"):
+                    supabase.table("tasks").update({
+                        "assigned_agent_id": agent_data["id"]
+                    }).eq("id", task["id"]).execute()
+
+                result = await TaskQueueService.queue_task(task["id"])
+                if result and result.data:
+                    queued += 1
+                else:
+                    skipped += 1
+            except Exception as exc:
+                failed += 1
+                logger.error(f"Project queueing task failed: {str(exc)}")
+                supabase.table("tasks").update({
+                    "status": "failed",
+                    "last_error": str(exc),
+                    "output_data": {"error": str(exc)}
+                }).eq("id", task["id"]).execute()
+                await audit_service.log_action(
+                    user_id=owner_id,
+                    action="task_queue_failed",
+                    task_id=task.get("id"),
+                    metadata={"project_id": project_id, "error": str(exc)},
+                )
+
+        await audit_service.log_action(
+            user_id=owner_id,
+            action="project_queued",
+            metadata={
+                "project_id": project_id,
+                "queued_tasks": queued,
+                "failed": failed,
+                "skipped": skipped,
+            },
+        )
+
+        return {
+            "project_id": project_id,
+            "queued_tasks": queued,
+            "failed": failed,
+            "skipped": skipped,
+            "mode": "queue",
         }
 
     def _select_report_agent(self, project: dict, variant: str):
@@ -567,13 +718,10 @@ class OrchestratorService:
         if project.get("context"):
             lines.extend(["## Context", project["context"], ""])
 
-        lines.extend(["## Execution Summary", ""])
-        
-        # We will add the tabular summary later in the UI or via charts, 
-        # but for the text report, we include the approved work summary.
-        lines.extend(["## Approved Work Summary", ""])
+        approved_work_lines = ["## Approved Work Summary", ""]
 
         report_exclusions: list[str] = []
+        included_tasks: list[dict] = []
         kept_task_count = 0
         for task in curated_tasks:
             curated_text, excluded_lines = self._curate_task_output(task.get("output_data"))
@@ -585,13 +733,19 @@ class OrchestratorService:
                 })
                 continue
             kept_task_count += 1
-            lines.extend([
+            included_tasks.append(task)
+            approved_work_lines.extend([
                 f"### {kept_task_count}. {task['title']}",
                 task.get("description") or "No task description provided.",
                 "",
                 curated_text,
                 ""
             ])
+
+        charts = _build_report_charts(included_tasks)
+        lines.extend(["## Execution Summary", ""])
+        lines.extend(_format_execution_summary(charts, len(tasks), kept_task_count, len(excluded_tasks)))
+        lines.extend(approved_work_lines)
 
         if excluded_tasks or report_exclusions:
             lines.extend(["## Excluded Content", ""])
@@ -651,13 +805,24 @@ class OrchestratorService:
                 logger.warning(f"Report variant generation failed: {exc}")
                 report = self._build_fallback_variant(project, tasks, variant) or report
 
+        await audit_service.log_action(
+            user_id=project.get("owner_id"),
+            action="final_report_generated",
+            metadata={
+                "project_id": project_id,
+                "variant": variant,
+                "task_count": kept_task_count,
+                "excluded_task_count": len(excluded_tasks),
+            },
+        )
+
         return {
             "project_id": project_id,
             "project_name": project["name"],
             "task_count": kept_task_count,
             "variant": variant,
             "report": clean_report_text(dedupe_lines(report)),
-            "charts": _build_report_charts(curated_tasks)
+            "charts": charts
         }
 
     async def decompose_project(self, project_id: str):
@@ -750,6 +915,11 @@ Do not use placeholder names or generic filler tasks. Every task title must be c
             # Insert tasks
             from .project_service import project_service
             await project_service.add_tasks_to_project(project_id, valid_tasks)
+            await audit_service.log_action(
+                user_id=owner_id,
+                action="project_decomposed",
+                metadata={"project_id": project_id, "task_count": len(valid_tasks)},
+            )
             logger.info(f"Auto-decomposed project {project_id} into {len(valid_tasks)} tasks.")
         except Exception as e:
             logger.error(f"Project decomposition failed: {e}")

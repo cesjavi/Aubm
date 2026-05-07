@@ -4,6 +4,8 @@ import { MessageSquare, Play, CheckCircle2, AlertCircle } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { getApiUrl } from '../services/runtimeConfig';
 
+type JsonRecord = Record<string, unknown>;
+
 interface DebateAgent {
   id: string;
   name: string;
@@ -16,19 +18,29 @@ interface DebateTask {
   status: string;
 }
 
-const renderContent = (content: any) => {
+interface DebateHistory {
+  initial?: unknown;
+  critique?: unknown;
+  final?: unknown;
+}
+
+const isRecord = (value: unknown): value is JsonRecord =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const renderContent = (content: unknown): React.ReactNode => {
   if (!content) return null;
   if (typeof content === 'string') return content;
   
-  if (Array.isArray(content) && content.length > 0 && typeof content[0] === 'object' && !Array.isArray(content[0])) {
+  if (Array.isArray(content) && content.length > 0 && isRecord(content[0])) {
     const keys = Object.keys(content[0]);
     const isTableCandidate = content.every(item => 
-      item && typeof item === 'object' && 
+      isRecord(item) &&
       Object.keys(item).length === keys.length && 
       keys.every(k => Object.keys(item).includes(k))
     );
 
     if (isTableCandidate && keys.length <= 6) {
+      const rows = content as JsonRecord[];
       return (
         <div style={{ overflowX: 'auto', marginBottom: '16px', borderRadius: 'var(--radius-md)', border: '1px solid rgba(255,255,255,0.05)' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
@@ -42,11 +54,11 @@ const renderContent = (content: any) => {
               </tr>
             </thead>
             <tbody>
-              {content.map((item, i) => (
+              {rows.map((item, i) => (
                 <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', background: i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.02)' }}>
                   {keys.map(k => (
                     <td key={k} style={{ padding: '10px 8px', color: 'rgba(255,255,255,0.9)' }}>
-                      {typeof item[k] === 'object' ? JSON.stringify(item[k]) : String(item[k])}
+                      {isRecord(item[k]) || Array.isArray(item[k]) ? JSON.stringify(item[k]) : String(item[k])}
                     </td>
                   ))}
                 </tr>
@@ -63,14 +75,14 @@ const renderContent = (content: any) => {
       <ul style={{ paddingLeft: '20px', margin: 0 }}>
         {content.map((item, i) => (
           <li key={i} style={{ marginBottom: '8px' }}>
-            {typeof item === 'object' ? renderContent(item) : String(item)}
+            {isRecord(item) || Array.isArray(item) ? renderContent(item) : String(item)}
           </li>
         ))}
       </ul>
     );
   }
 
-  if (typeof content === 'object') {
+  if (isRecord(content)) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
         {Object.entries(content).map(([key, value]) => (
@@ -92,7 +104,7 @@ const renderContent = (content: any) => {
               color: 'rgba(255,255,255,0.9)',
               lineHeight: '1.5'
             }}>
-              {typeof value === 'object' ? renderContent(value) : String(value)}
+              {isRecord(value) || Array.isArray(value) ? renderContent(value) : String(value)}
             </div>
           </div>
         ))}
@@ -110,7 +122,7 @@ const DebateView: React.FC = () => {
   const [agentB, setAgentB] = useState('');
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
-  const [debateResult, setDebateResult] = useState<any>(null);
+  const [debateResult, setDebateResult] = useState<DebateHistory | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -285,7 +297,7 @@ const DebateView: React.FC = () => {
               </div>
             </div>
 
-            {debateResult.critique && (
+            {debateResult.critique !== undefined && debateResult.critique !== null && (
               <div style={{ marginTop: 'var(--space-md)', padding: 'var(--space-md)', background: 'rgba(255, 107, 107, 0.05)', borderRadius: 'var(--radius-md)', border: '1px solid rgba(255, 107, 107, 0.1)' }}>
                 <div style={{ fontSize: '0.7rem', color: 'var(--danger)', textTransform: 'uppercase', marginBottom: '8px', letterSpacing: '1px' }}>Critique Context</div>
                 <div style={{ fontSize: '0.85rem', color: 'var(--text-dim)', fontStyle: 'italic' }}>

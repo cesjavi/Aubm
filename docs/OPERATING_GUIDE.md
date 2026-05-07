@@ -2,32 +2,59 @@
 
 ## What Aubm Does
 
-Aubm is an AI agent orchestration platform. Users sign in with Supabase Auth, deploy or configure agents, assign them to tasks, run autonomous executions, review outputs, and monitor system health from a React dashboard.
+Aubm is an AI agent orchestration platform. Users sign in with Supabase Auth, create projects, provide context and sources, deploy or configure agents, run task workflows, review outputs, and produce reports.
 
 The application has three main layers:
 
-- `frontend/`: React + Vite dashboard for authentication, marketplace, debates, voice control, spatial task visualization, and monitoring.
-- `backend/`: FastAPI API for task execution, multi-agent debate orchestration, tool calling, and monitoring.
-- `database/`: Supabase SQL schema, seed data, RLS policies, marketplace tables, audit logs, teams, and migrations.
+- `frontend/`: React + Vite dashboard for projects, marketplace, agents, debates, voice control, spatial view, monitoring, and settings.
+- `backend/`: FastAPI API for task execution, project orchestration, report generation, debate orchestration, worker support, and monitoring.
+- `database/`: Supabase schema, RLS policies, marketplace tables, audit tables, task dependencies, and migrations.
 
 ## Core Runtime Flow
 
-1. A user signs in through Supabase Auth.
-2. The frontend reads templates, agents, projects, and tasks from Supabase.
-3. A user deploys an agent from the marketplace into `public.agents`.
-4. A task references an assigned agent through `tasks.assigned_agent_id`.
-5. `POST /tasks/{task_id}/run` starts backend execution.
-6. The backend loads the task, assigned agent, and previous completed task outputs.
-7. `AgentFactory` creates the right provider implementation, currently `OpenAIAgent` or `AMDAgent`.
-8. The agent produces JSON output.
-9. The backend writes output to `tasks.output_data`, moves the task to `awaiting_approval`, records `task_runs`, `agent_logs`, and `audit_logs`.
-10. A human reviews, edits, approves, or gives feedback through the frontend.
+1. User signs in with Supabase Auth.
+2. User creates a project through the Guided or Expert wizard.
+3. User optionally adds links, notes, or files as project context.
+4. User deploys or creates agents.
+5. User creates tasks manually or runs project orchestration to decompose the project.
+6. Backend executes tasks through assigned agents.
+7. Task output moves to `awaiting_approval`.
+8. Human approves, rejects, retries, or reviews output.
+9. Once tasks are approved, reports can be generated.
+10. Full report generation marks the project `completed`; completed projects become read-only.
+
+## UI Modes
+
+Guided mode:
+
+- Focused workflow.
+- Project creation wizard: Basics, Context, Sources, Review.
+- Guided project detail panel for agents, plan, review, and finalize.
+
+Expert mode:
+
+- Full navigation.
+- Project creation wizard: Basics, Context, Sources, Access, Review.
+- Advanced controls for dependencies, assignments, debate, voice, spatial view, monitoring, and settings.
 
 ## Main Features
 
 ### Dashboard
 
-Shows project cards and high-level workflow progress. It is currently a static dashboard scaffold, ready to be connected to live project data.
+Shows project cards with status and task progress. Includes search, status filter, progress filter, sorting, refresh, and project deletion.
+
+### Project Detail
+
+Supports:
+
+- Default agent generation.
+- Manual task creation and editing.
+- Agent assignment.
+- Task dependency selection.
+- Task filtering by status, including `queued`.
+- Review, approve, reject, retry, and final report flows.
+- Roadmap modal inferred from task status, priority, and dependencies.
+- Read-only mode when the project is completed.
 
 ### Agent Marketplace
 
@@ -35,94 +62,81 @@ Reads `agent_templates` from Supabase and deploys selected templates into `agent
 
 Required database support:
 
-- `agents.user_id`
-- Insert policy allowing authenticated users to create agents where `auth.uid() = user_id`
-
-Apply:
-
-```sql
--- database/agent_ownership.sql
-```
+- `database/marketplace.sql`
+- `database/agent_ownership.sql`
 
 ### Custom Agents
 
-The `Agents` screen lets users create custom agents directly.
-
-Each agent has:
-
-- Name
-- Role
-- LLM provider
-- Model
-- System prompt
-
-The currently wired backend providers are:
-
-- `openai`
-- `amd`
-
-Settings stores the frontend default provider/model in browser local storage. Provider API keys are never stored in the frontend; they must stay in `backend/.env`.
+The `Agents` screen lets users create custom agents with name, role, provider, model, and system prompt. API keys stay in `backend/.env`, not in the frontend.
 
 ### Agent Debate
 
-Uses the backend endpoint:
+Endpoint:
 
 ```text
 POST /orchestrator/debate
 ```
 
-The flow is:
+Flow:
 
 1. Agent A generates an initial answer.
-2. Agent B critiques the answer.
-3. Agent A refines the output.
-4. The final debate result is saved to `tasks.output_data`.
-
-### Voice Control
-
-Uses browser Web Speech APIs.
-
-Supported commands include:
-
-- `dashboard`
-- `marketplace`
-- `debate`
-- `settings`
-- `new project`
-- `status`
-
-The `status` command reads project/task counts from Supabase and speaks the result.
-
-### Spatial View
-
-Shows a layered task DAG-style visualization. It reads recent tasks from Supabase and falls back to demo nodes if no tasks are available.
+2. Agent B critiques it.
+3. Agent A refines it.
+4. Final debate result is saved to `tasks.output_data`.
 
 ### Monitoring
 
-Uses:
+Endpoint:
 
 ```text
 GET /monitoring/summary
 ```
 
-The endpoint reports:
+The frontend falls back to direct Supabase counts if the backend endpoint is unavailable.
 
-- API status
-- Database status
-- Project count
-- Task count
-- Agent count
-- Task run count
-- Failed tasks
-- Tasks awaiting approval
+### Worker
 
-If the backend endpoint is unavailable, the frontend falls back to direct Supabase count queries.
+The worker scaffold exists:
+
+```powershell
+cd backend
+python worker.py
+```
+
+Existing databases must apply:
+
+```sql
+-- database/add_task_queued_status.sql
+-- database/add_task_queue_leasing.sql
+-- database/add_task_queue_retry_backoff.sql
+-- database/add_worker_heartbeats.sql
+```
+
+To use the worker for task/project execution:
+
+```env
+TASK_EXECUTION_MODE=queue
+```
+
+By default, queue mode starts an embedded worker inside the FastAPI process:
+
+```env
+TASK_QUEUE_EMBEDDED_WORKER=true
+```
+
+For separate worker processes, disable the embedded worker and run `python worker.py` independently.
+
+Or opt in per request:
+
+```text
+POST /tasks/{task_id}/run?use_queue=true
+POST /orchestrator/projects/{project_id}/run?use_queue=true
+```
 
 ## Backend Setup
 
-From `backend/`:
-
 ```powershell
+cd backend
 python -m venv venv
 .\venv\Scripts\activate
 pip install -r requirements.txt
@@ -134,23 +148,23 @@ Required `backend/.env` values:
 ```env
 SUPABASE_URL=...
 SUPABASE_SERVICE_ROLE_KEY=...
-OPENAI_API_KEY=...
-AMD_API_KEY=...
 ```
 
-Optional provider keys:
+Optional provider and monitoring values:
 
 ```env
+OPENAI_API_KEY=...
 GROQ_API_KEY=...
 GEMINI_API_KEY=...
-ANTHROPIC_API_KEY=...
+AMD_API_KEY=...
+TAVILY_API_KEY=...
+SENTRY_DSN=...
 ```
 
 ## Frontend Setup
 
-From `frontend/`:
-
 ```powershell
+cd frontend
 npm install
 npm run dev
 ```
@@ -163,15 +177,9 @@ VITE_SUPABASE_ANON_KEY=...
 VITE_API_URL=http://127.0.0.1:8000
 ```
 
-Build check:
-
-```powershell
-npm run build
-```
-
 ## Database Setup Order
 
-Apply SQL files in this order for a fresh Supabase project:
+Fresh project:
 
 1. `database/schema.sql`
 2. `database/seed.sql`
@@ -182,99 +190,69 @@ Apply SQL files in this order for a fresh Supabase project:
 7. `database/task_owner_policies.sql`
 8. `database/default_agents.sql`
 
-For an existing Supabase project where marketplace deploy fails with missing `user_id`, apply only:
+Common existing-project migrations:
 
-```sql
--- database/agent_ownership.sql
-```
+- `database/add_task_run_duration.sql`
+- `database/add_task_queued_status.sql`
+- `database/add_task_queue_leasing.sql`
+- `database/add_task_queue_retry_backoff.sql`
+- `database/add_worker_heartbeats.sql`
+- `database/add_audit_mutation_triggers.sql`
+- `database/add_profile_manager_role.sql`
+- `database/fix_profiles_recursion.sql`
 
-Then reload the frontend with a hard refresh.
-
-## Important Tables
-
-- `profiles`: User metadata and role.
-- `projects`: Project containers.
-- `agents`: Deployed AI agents.
-- `agent_templates`: Marketplace templates.
-- `tasks`: Work units assigned to agents.
-- `task_runs`: Execution history.
-- `agent_logs`: Agent execution traces.
-- `audit_logs`: Governance and compliance trail.
-- `task_feedback`: Like/dislike feedback for future tuning.
-- `teams` and `team_members`: Enterprise team permissions.
-
-## Tool System
-
-The backend exposes tools to agents through `tools/registry.py`.
-
-Available tools include:
-
-- Web extraction with Playwright.
-- Python code execution.
-- PDF generation.
-- Excel generation.
-- Project decomposition.
-- System health checks.
-- Restricted patch commands.
-
-## Current Roadmap State
-
-Completed:
-
-- Core backend and frontend foundation.
-- Supabase auth and schema.
-- Agent execution.
-- Multi-agent debate.
-- Marketplace.
-- Voice control.
-- Spatial task viewer.
-- Operations monitoring.
-
-In progress:
-
-- Production operations hardening.
-- Error tracking.
-- Docker/runtime packaging.
-- Frontend bundle splitting.
-- Production CORS allowlist.
+For a guided checklist, see [MIGRATION_GUIDE.md](./MIGRATION_GUIDE.md).
 
 ## Common Errors
 
-### `403 Forbidden` on `POST /rest/v1/agents`
+### `Could not find the 'duration_seconds' column of 'task_runs' in the schema cache`
 
-Cause: RLS policy does not allow insert.
-
-Fix: Apply `database/agent_ownership.sql`.
-
-### `Could not find the 'user_id' column of 'agents' in the schema cache`
-
-Cause: `agents.user_id` is missing or PostgREST schema cache has not reloaded.
-
-Fix:
+Apply:
 
 ```sql
-ALTER TABLE public.agents
-ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES auth.users ON DELETE CASCADE;
-
-NOTIFY pgrst, 'reload schema';
+-- database/add_task_run_duration.sql
 ```
 
-Then hard refresh the frontend.
+### `new row for relation "tasks" violates check constraint`
 
-### `OTS parsing error`
+If the value is `queued`, apply:
 
-Cause: A CSS URL was incorrectly used as a font file.
+```sql
+-- database/add_task_queued_status.sql
+```
 
-Fix: Use Google Fonts through `@import`, already applied in `frontend/src/styles/variables.css`.
+If the worker cannot find `claim_next_queued_task`, also apply:
 
-### Frontend chunk-size warning
+```sql
+-- database/add_task_queue_leasing.sql
+```
 
-Vite currently warns that the JS chunk is larger than 500 KB. This is not a runtime error. The Phase 5 roadmap includes bundle splitting.
+If Monitoring cannot read worker heartbeat data, apply:
+
+```sql
+-- database/add_worker_heartbeats.sql
+```
+
+### Marketplace shows no templates
+
+Apply:
+
+```sql
+-- database/marketplace.sql
+```
+
+### Recursive profiles policy error
+
+Apply:
+
+```sql
+-- database/fix_profiles_recursion.sql
+```
 
 ## Development Rules
 
-- Keep frontend display text in English.
-- Keep documentation in English.
-- Keep database migrations idempotent when possible.
-- Never commit real secrets from `.env`.
-- Prefer applying database changes through separate migration files instead of editing only `schema.sql`.
+- Keep application UI text in English.
+- Keep technical documentation in English.
+- Keep migrations idempotent when possible.
+- Do not commit real secrets.
+- Prefer separate migration files for database changes.

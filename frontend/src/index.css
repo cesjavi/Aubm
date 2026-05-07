@@ -143,6 +143,7 @@
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
   gap: var(--space-lg);
+  align-items: stretch;
 }
 
 .dashboard-heading {
@@ -150,6 +151,67 @@
   align-items: flex-end;
   justify-content: space-between;
   gap: var(--space-lg);
+}
+
+.dashboard-controls {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) auto auto;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-md);
+  margin-bottom: var(--space-lg);
+}
+
+.dashboard-search,
+.dashboard-filter-group,
+.dashboard-results {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.dashboard-search {
+  min-width: 0;
+  padding: 0 0.85rem;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  background: rgba(255,255,255,0.05);
+  color: var(--text-dim);
+}
+
+.dashboard-search input,
+.dashboard-filter-group select {
+  min-width: 0;
+  color: var(--text-main);
+  background: transparent;
+  border: 0;
+  outline: 0;
+  font: inherit;
+}
+
+.dashboard-search input {
+  width: 100%;
+  padding: 0.8rem 0;
+}
+
+.dashboard-search input::placeholder {
+  color: var(--text-muted);
+}
+
+.dashboard-filter-group select {
+  min-height: 42px;
+  padding: 0 0.75rem;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  background: rgba(255,255,255,0.05);
+  color-scheme: dark;
+}
+
+.dashboard-results {
+  justify-content: flex-end;
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  white-space: nowrap;
 }
 
 .empty-state {
@@ -174,6 +236,73 @@
 .project-card-header {
   align-items: flex-start;
   margin-bottom: var(--space-md);
+}
+
+.project-card {
+  min-height: 265px;
+  padding: var(--space-lg);
+  position: relative;
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: minmax(92px, auto) 1fr auto auto;
+}
+
+.project-card h3 {
+  min-width: 0;
+  margin: 0;
+  font-size: 1.18rem;
+  line-height: 1.22;
+  overflow-wrap: anywhere;
+}
+
+.project-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.project-card-actions .btn-icon {
+  width: 28px;
+  height: 28px;
+  padding: 4px;
+}
+
+.project-card-progress {
+  align-self: end;
+  margin-bottom: var(--space-lg);
+}
+
+.project-card-progress-label {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  min-height: 20px;
+  margin-bottom: var(--space-xs);
+  font-size: 0.85rem;
+}
+
+.project-card-progress-label span:first-child {
+  color: var(--text-dim);
+}
+
+.project-card-progress-track {
+  height: 6px;
+  width: 100%;
+  overflow: hidden;
+  background: rgba(255,255,255,0.1);
+  border-radius: 3px;
+}
+
+.project-card-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 3px;
+  box-shadow: 0 0 10px var(--accent);
+}
+
+.project-card-open {
+  width: 100%;
 }
 
 .marketplace-card-footer {
@@ -704,6 +833,8 @@
   color: var(--danger);
 }
 
+.check-warning,
+.check-unavailable,
 .check-unreachable,
 .check-checking {
   color: var(--warning);
@@ -713,6 +844,135 @@
   padding: var(--space-lg);
   display: grid;
   gap: var(--space-lg);
+}
+
+.field-with-help {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 280px);
+  gap: var(--space-md);
+  align-items: start;
+}
+
+.field-with-help-compact {
+  grid-template-columns: minmax(0, 1fr) minmax(190px, 240px);
+}
+
+.field-with-help-action {
+  align-items: center;
+}
+
+.field-help {
+  padding: 0.1rem 0 0.1rem var(--space-md);
+  color: var(--text-dim);
+  border-left: 1px solid rgba(0, 240, 255, 0.45);
+}
+
+.field-help strong {
+  display: block;
+  margin-bottom: 0.35rem;
+  color: var(--text-main);
+  font-size: 0.85rem;
+}
+
+.field-help p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  line-height: 1.55;
+}
+
+.wizard-panel {
+  display: grid;
+  gap: var(--space-md);
+}
+
+.wizard-steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+  gap: var(--space-sm);
+}
+
+.wizard-step {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  min-height: 42px;
+  padding: 0.55rem 0.7rem;
+  color: var(--text-dim);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.wizard-step span {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  color: var(--text-main);
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-full);
+  font-size: 0.72rem;
+}
+
+.wizard-step.active {
+  color: var(--text-main);
+  border-color: rgba(0, 240, 255, 0.7);
+  background: rgba(0, 240, 255, 0.08);
+}
+
+.wizard-step.complete span {
+  color: var(--bg-deep);
+  background: var(--accent);
+}
+
+.wizard-explanation,
+.wizard-review {
+  padding: var(--space-md);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.wizard-explanation p {
+  margin: var(--space-xs) 0 0;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+
+.wizard-review {
+  display: grid;
+  gap: var(--space-md);
+}
+
+.wizard-review div {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.wizard-review span {
+  color: var(--text-dim);
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.wizard-review strong,
+.wizard-review p {
+  margin: 0;
+  color: var(--text-main);
+  overflow-wrap: anywhere;
+}
+
+.wizard-actions {
+  display: flex;
+  gap: var(--space-md);
+  flex-wrap: wrap;
 }
 
 .project-form label {
@@ -785,6 +1045,22 @@ select option {
   font-size: 0.85rem;
   font-weight: 500;
   animation: slideDown 0.3s ease;
+}
+
+.project-locked-notice {
+  align-items: flex-start;
+  border-color: rgba(46, 204, 113, 0.28);
+  background: rgba(46, 204, 113, 0.08);
+}
+
+.read-only-note {
+  padding: 0.75rem 0.9rem;
+  color: var(--text-dim);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 0.9rem;
+  line-height: 1.45;
 }
 
 @keyframes slideDown {
@@ -941,6 +1217,130 @@ select option {
   text-transform: uppercase;
 }
 
+.modal-title-row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-md);
+  align-items: flex-start;
+  margin-bottom: var(--space-md);
+}
+
+.modal-title-row p {
+  margin-top: var(--space-xs);
+  color: var(--text-dim);
+}
+
+.roadmap-modal {
+  width: min(100%, 980px);
+}
+
+.roadmap-timeline {
+  display: grid;
+  gap: var(--space-lg);
+  max-height: 66vh;
+  overflow-y: auto;
+  padding-right: var(--space-sm);
+}
+
+.roadmap-phase {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: var(--space-md);
+}
+
+.roadmap-phase-marker {
+  position: relative;
+  display: flex;
+  justify-content: center;
+}
+
+.roadmap-phase-marker::after {
+  content: "";
+  position: absolute;
+  top: 38px;
+  bottom: -24px;
+  width: 1px;
+  background: var(--glass-border);
+}
+
+.roadmap-phase:last-child .roadmap-phase-marker::after {
+  display: none;
+}
+
+.roadmap-phase-marker span {
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  color: var(--bg-deep);
+  background: var(--accent);
+  border-radius: var(--radius-full);
+  font-size: 0.82rem;
+  font-weight: 900;
+  box-shadow: 0 0 14px rgba(0, 240, 255, 0.35);
+}
+
+.roadmap-phase-content {
+  display: grid;
+  gap: var(--space-md);
+  min-width: 0;
+}
+
+.roadmap-phase-header,
+.roadmap-task {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-md);
+}
+
+.roadmap-phase-header {
+  align-items: center;
+}
+
+.roadmap-phase-header h4 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.roadmap-phase-header span,
+.roadmap-task small,
+.roadmap-task-meta span:last-child {
+  color: var(--text-dim);
+  font-size: 0.8rem;
+}
+
+.roadmap-task-list {
+  display: grid;
+  gap: var(--space-sm);
+}
+
+.roadmap-task {
+  align-items: flex-start;
+  padding: var(--space-md);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.roadmap-task > div:first-child {
+  min-width: 0;
+}
+
+.roadmap-task p {
+  margin: var(--space-xs) 0;
+  color: var(--text-dim);
+  line-height: 1.45;
+}
+
+.roadmap-task-meta {
+  display: grid;
+  justify-items: end;
+  align-content: start;
+  gap: var(--space-sm);
+  white-space: nowrap;
+}
+
 .task-row span {
   flex: 0 0 auto;
   color: var(--accent);
@@ -991,6 +1391,21 @@ select option {
     flex-direction: column;
   }
 
+  .dashboard-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-filter-group,
+  .dashboard-results {
+    width: 100%;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .dashboard-filter-group select {
+    flex: 1 1 150px;
+  }
+
   .marketplace-search {
     width: 100%;
     flex-basis: auto;
@@ -1022,6 +1437,15 @@ select option {
 
   .project-detail-grid {
     grid-template-columns: 1fr;
+  }
+
+  .modal-title-row,
+  .roadmap-task {
+    flex-direction: column;
+  }
+
+  .roadmap-task-meta {
+    justify-items: start;
   }
 }
 
@@ -1123,6 +1547,15 @@ select option {
     width: 100%;
   }
 
+  .field-with-help,
+  .field-with-help-compact {
+    grid-template-columns: 1fr;
+  }
+
+  .field-help {
+    padding: 0 0 0 var(--space-md);
+  }
+
   .task-row {
     flex-direction: column;
   }
@@ -1138,7 +1571,9 @@ select option {
   letter-spacing: 0.5px;
 }
 .status-todo { background: rgba(100, 100, 100, 0.2); color: #aaa; }
+.status-queued { background: rgba(155, 89, 182, 0.2); color: #c084fc; border: 1px solid rgba(155, 89, 182, 0.3); }
 .status-running { background: rgba(52, 152, 219, 0.2); color: #3498db; border: 1px solid rgba(52, 152, 219, 0.3); }
+.status-in_progress { background: rgba(52, 152, 219, 0.2); color: #3498db; border: 1px solid rgba(52, 152, 219, 0.3); }
 .status-awaiting_approval { background: rgba(241, 196, 15, 0.2); color: #f1c40f; border: 1px solid rgba(241, 196, 15, 0.3); }
 .status-done { background: rgba(46, 204, 113, 0.2); color: #2ecc71; }
 .status-failed { background: rgba(231, 76, 60, 0.2); color: #e74c3c; }

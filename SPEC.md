@@ -1,137 +1,200 @@
-# 🛠️ Aubm — Technical Specification
+# Aubm Technical Specification
 
-> **Target Stack**: FastAPI (Python) + React/TypeScript (Vite) + Supabase (Postgres + Auth)
+Target stack: FastAPI + React/TypeScript + Supabase.
 
-This document provides a comprehensive technical blueprint for recreating Aubm.
+This document describes the current product architecture and the contracts that matter for development. For status and sequencing, see [ROADMAP.md](./ROADMAP.md).
 
----
+## 1. Architecture
 
-## 1. System Architecture
+Aubm uses Supabase as the source of truth for users, projects, agents, tasks, templates, and execution records.
 
-Aubm follows a decoupled architecture with a centralized database (Supabase) acting as the source of truth and coordination layer.
+```text
+backend/
+  main.py                    FastAPI entrypoint
+  worker.py                  Polling worker scaffold for queued tasks
+  agents/                    LLM provider adapters
+  routers/
+    agent_runner.py          Task run, approve, reject, approve-all
+    orchestrator.py          Debate, project run, report, PDF export
+  services/
+    orchestrator_service.py  Project orchestration and report building
+    agent_runner_service.py  Task execution and task_runs persistence
+    task_queue.py            Lightweight queued-task helper
+    output_quality.py        Heuristic output quality checks
+    semantic_backprop.py     Prior completed-output context builder
+  tools/                     Tool registry and tool implementations
 
-### Directory Structure
-```
-aubm/
-├── backend/                  # Python 3.10+
-│   ├── main.py              # Application entrypoint & CRUD API
-│   ├── worker.py            # Standalone task queue worker
-│   ├── schema.sql           # Full DDL for Supabase
-│   ├── agents/              # Provider-specific implementations
-│   │   ├── base.py          # Abstract BaseAgent class
-│   │   ├── agent_factory.py # Factory for creating agent instances
-│   │   └── {provider}_agent.py
-│   ├── routers/             # Functional endpoint grouping
-│   │   ├── agent_runner.py  # Task execution logic
-│   │   └── orchestrator.py  # Multi-task project flow
-│   └── services/            # Core business logic
-│       ├── config.py        # Configuration management
-│       ├── task_queue.py    # Background processing loop
-│       └── semantic_backprop.py # RAG context builder
-├── frontend/                # React + Vite + TS
-│   ├── src/
-│   │   ├── components/      # UI Modular components
-│   │   ├── services/        # API communication layer
-│   │   ├── context/         # Auth & Global state
-│   │   └── i18n/            # Multi-language support
-│   └── vite.config.ts
-└── database/                # Migrations & Seed data
+frontend/
+  src/components/            Dashboard, project detail, marketplace, settings, monitoring
+  src/services/              Supabase, runtime config, LLM defaults, UI mode
+  src/context/               Auth context
+
+database/
+  schema.sql                 Baseline schema
+  *.sql                      Idempotent migrations and seed files
 ```
 
----
-
-## 2. Database Schema (Supabase/Postgres)
+## 2. Database
 
 ### Core Tables
 
-| Table | Purpose | Key Columns |
-|-------|---------|-------------|
-| `profiles` | User extensions | `id (uuid)`, `role`, `full_name`, `avatar_url` |
-| `projects` | Project containers | `id`, `name`, `description`, `context`, `owner_id`, `status` |
-| `agents` | AI Identities | `id`, `name`, `role`, `api_provider`, `model`, `system_prompt` |
-| `tasks` | Units of work | `id`, `project_id`, `assigned_agent_id`, `status`, `output_data` |
-| `task_runs` | Execution history | `id`, `task_id`, `agent_id`, `status`, `error_message` |
-| `agent_logs` | Execution traces | `id`, `task_id`, `action`, `content`, `metadata` |
-| `app_config` | Global settings | `key`, `value` (JSONB) |
+| Table | Purpose |
+| --- | --- |
+| `profiles` | User metadata and role: `user`, `manager`, `admin`. |
+| `projects` | Project containers with owner, context, status, visibility. |
+| `agents` | Deployed agents owned by users or global templates. |
+| `agent_templates` | Marketplace agent templates. |
+| `tasks` | Units of work with status, priority, assigned agent, output data. |
+| `task_runs` | Execution history, status, errors, duration. |
+| `agent_logs` | Execution traces. |
+| `task_dependencies` | Task dependency edges. |
+| `audit_logs` | Governance trail. Coverage is partial and should be expanded. |
+| `task_feedback` | Like/dislike feedback for future optimization. |
+| `worker_heartbeats` | Background worker status and processing counters. |
 
-### Status Enums
-- **Tasks**: `todo`, `in_progress`, `awaiting_approval`, `done`, `failed`, `cancelled`.
-- **Task Runs**: `queued`, `running`, `completed`, `failed`, `cancelled`.
-- **Profiles**: `user`, `manager`, `admin`.
+### Status Values
 
----
+Projects:
 
-## 3. Backend Logic
+```text
+active, archived, completed
+```
 
-### Agent Execution Flow
-1. **Request**: `POST /tasks/{id}/run`
-2. **Initialization**: Fetch task, agent, and project data.
-3. **Context Building**: `semantic_backprop` fetches outputs from previous tasks in the same project.
-4. **Agent Factory**: Instantiates the correct `BaseAgent` subclass (e.g., `GroqAgent`).
-5. **Execution**:
-    - LLM call with dynamic prompt.
-    - Real-time logging to `agent_logs` via SSE.
-6. **Guardrails**:
-    - `output_cleaner`: Strips markdown artifacts.
-    - `language_guard`: Ensures output matches `app_config["output_language"]`.
-7. **Persistence**: Updates `task.output_data` and sets status to `awaiting_approval`.
+Tasks:
 
-### Orchestration Engine
-- Processes a project's task list as a Directed Acyclic Graph (DAG).
-- Respects `is_critical` and `priority` fields.
-- Auto-assigns available agents from the `agents` pool if no agent is pre-assigned.
+```text
+todo, queued, in_progress, awaiting_approval, done, failed, cancelled
+```
 
-### Tool System (Phase 2)
-- **Tool Registry**: A central registry where tools are defined and permissioned.
-- **Browser Tool**: Uses Playwright for headless browsing and content extraction.
-- **Sandbox Tool**: Executes code in a restricted environment.
-- **Integration**: Tools are exposed to agents via the OpenAI function-calling/tool-calling schema.
+Task runs:
 
----
+```text
+queued, running, completed, failed, cancelled
+```
 
-## 4. Frontend Design System
+Completed projects are locked by frontend controls and backend mutation checks. Reports remain available.
 
-- **Styling**: Vanilla CSS with modern variables (HSL colors, glassmorphism).
-- **Icons**: Lucide React.
-- **State Management**: React Context + Hooks.
-- **Features**:
-    - Kanban Board for task management.
-    - Real-time streaming console for agent thoughts.
-    - Interactive Project Wizard for quick setup.
-    - Analytics dashboard for project performance.
+## 3. Backend Contracts
 
----
+### Task Execution
 
-## 5. Deployment Guide
+`POST /tasks/{task_id}/run`
 
-### Vercel Integration
-The project is designed to run seamlessly on Vercel:
-- **Frontend**: Standard Vite build.
-- **Backend**: Python Serverless Functions.
-- **Database**: External Supabase instance.
+Optional query:
 
-### Local Setup
-1. **DB**: Apply `schema.sql` to Supabase.
-2. **Backend**: `pip install -r requirements.txt` & `uvicorn main:app`.
-3. **Frontend**: `npm install` & `npm run dev`.
+```text
+use_queue=true
+```
 
----
+1. Load task and assigned agent.
+2. Reject execution if the parent project is completed.
+3. If `use_queue=true` or `TASK_EXECUTION_MODE=queue`, set task to `queued` for worker execution.
+4. Otherwise set task to `in_progress` and execute through `AgentRunnerService`.
+5. Write `task_runs`, `agent_logs`, and task output.
+6. Set task to `awaiting_approval` or `failed`.
 
-## 6. Key Dependencies
+### Task Review
 
-### Backend
-- `fastapi`, `supabase`, `openai`, `groq`, `google-genai`, `playwright`, `folium`.
+```text
+POST /tasks/{task_id}/approve
+POST /tasks/{task_id}/reject
+POST /tasks/project/{project_id}/approve-all
+```
 
-### Frontend
-- `react`, `lucide-react`, `framer-motion` (for animations), `i18next`.
+Approval runs output quality checks before moving a task to `done`. Rejection moves the task back to `todo`. These mutations are blocked when the project is completed.
 
----
+### Project Orchestration
 
-## 7. Security (RLS)
-- **Projects**: Only visible to owner or if `is_public=true`.
-- **Config**: Only writable by users with `role='admin'`.
-- **Agents**: Writable by `manager` or `admin`.
-- **Tasks**: Protected by project-level RLS.
+`POST /orchestrator/projects/{project_id}/run`
 
----
-*End of Specification*
+Runs `todo` and `failed` tasks in priority order and assigns available agents when needed. If the project has no tasks, it can decompose the project into tasks. Completed projects are not mutable and cannot be orchestrated again.
+
+Queue mode:
+
+- `TASK_EXECUTION_MODE=queue`, or
+- `POST /orchestrator/projects/{project_id}/run?use_queue=true`
+
+In queue mode, runnable tasks are assigned and moved to `queued` for `backend/worker.py`.
+
+### Reports
+
+```text
+GET /orchestrator/projects/{project_id}/final-report?variant=full|brief|pessimistic
+GET /orchestrator/projects/{project_id}/final-report.pdf?variant=full|brief|pessimistic
+```
+
+Reports are built from approved task output. Full report generation marks the project completed.
+
+### Queue Worker
+
+`backend/worker.py` polls `tasks.status = 'queued'` through `TaskQueueService`.
+
+Current state:
+
+- Worker scaffold exists.
+- `queued` task status is supported by schema/migration.
+- Task and project run endpoints can opt into queue mode.
+- Workers claim tasks through `claim_next_queued_task`, an atomic Postgres function using `FOR UPDATE SKIP LOCKED`.
+- Queue attempts, delayed retry time, and terminal failure text are stored on `tasks`.
+- Worker heartbeat, active worker count, queue depth, delayed retry count, and stale lease metrics are exposed in Monitoring.
+
+## 4. Frontend
+
+### Primary Views
+
+- Dashboard: project cards, search, filters, status/progress sorting.
+- New Project: wizard available in Guided and Expert modes.
+- Project Detail: task management, guided workflow, reports, roadmap modal.
+- Marketplace: agent template search and deploy.
+- Agents: custom agent management.
+- Debate: two-agent review flow.
+- Monitoring: backend-first health summary with Supabase fallback.
+- Voice Control: browser speech navigation/status.
+- Spatial View: DAG-style task visualization.
+- Settings: provider defaults, UI mode, user role management.
+
+### UI Modes
+
+Guided:
+
+- Simplified navigation and workflows.
+- Project wizard steps: Basics, Context, Sources, Review.
+
+Expert:
+
+- Advanced tools and settings.
+- Project wizard steps: Basics, Context, Sources, Access, Review.
+
+## 5. Security
+
+- Supabase Auth is used for authentication.
+- Email/password is the visible login method in the current UI.
+- Google/GitHub OAuth buttons are hidden. If OAuth is enabled in Supabase, document the enterprise auth policy before exposing it again.
+- RLS policies protect project ownership, tasks, agents, templates, and profiles.
+- Admin profile checks use a SECURITY DEFINER helper to avoid recursive RLS policies.
+- Manager role is supported in profile constraints and admin tooling.
+
+## 6. Current Gaps
+
+- Audit log coverage is incomplete.
+- Real-time logs are persisted, but true SSE/WebSocket streaming is not complete.
+- Cost control exists only as provider token configuration, not persisted budget enforcement.
+- Evidence-aware structured reporting is planned but not complete.
+- Worker queue has atomic leasing, retry backoff, and heartbeat monitoring. Queue mode remains opt-in until it is made the default execution path.
+
+## 7. Validation
+
+Frontend:
+
+```powershell
+cd frontend
+npm run lint
+npm run build
+```
+
+Backend syntax spot checks:
+
+```powershell
+python -m py_compile backend\worker.py backend\services\task_queue.py
+python -m py_compile backend\routers\agent_runner.py backend\routers\orchestrator.py
+```

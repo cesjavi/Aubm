@@ -1,7 +1,10 @@
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from services.supabase_service import supabase
 from services.agent_runner_service import AgentRunnerService
+from services.config import settings
+from services.audit_service import audit_service
 from services.output_quality import report_text_from_output
+from services.task_queue import TaskQueueService
 import logging
 
 router = APIRouter()
@@ -25,7 +28,24 @@ def _assert_task_quality(task: dict):
     reasons = quality_review.get("fail_reasons") or ["Task output failed quality validation."]
     raise HTTPException(status_code=400, detail=f"Task output failed quality review: {'; '.join(reasons)}")
 
+def _assert_project_is_mutable(project_id: str):
+    project = supabase.table("projects").select("id,status").eq("id", project_id).single().execute().data
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if project.get("status") == "completed":
+        raise HTTPException(status_code=409, detail="Completed projects are locked and cannot be modified.")
+
+def _assert_task_project_is_mutable(task: dict):
+    project_id = task.get("project_id")
+    if project_id:
+        _assert_project_is_mutable(project_id)
+
 def update_task_status(task_id: str, status: str):
+    task_res = supabase.table("tasks").select("project_id").eq("id", task_id).single().execute()
+    if not task_res.data:
+        raise HTTPException(status_code=404, detail="Task not found")
+    _assert_task_project_is_mutable(task_res.data)
+
     result = (
         supabase.table("tasks")
         .update({"status": status})
@@ -54,7 +74,7 @@ def update_task_status(task_id: str, status: str):
     return task_data
 
 @router.post("/{task_id}/run")
-async def run_task(task_id: str, background_tasks: BackgroundTasks):
+async def run_task(task_id: str, background_tasks: BackgroundTasks, use_queue: bool | None = None):
     """
     Triggers the execution of a specific task.
     """
@@ -64,6 +84,7 @@ async def run_task(task_id: str, background_tasks: BackgroundTasks):
         raise HTTPException(status_code=404, detail="Task not found")
     
     task = task_res.data
+    _assert_task_project_is_mutable(task)
     
     # 2. Check if agent is assigned
     agent_id = task.get("assigned_agent_id")
@@ -76,9 +97,30 @@ async def run_task(task_id: str, background_tasks: BackgroundTasks):
         raise HTTPException(status_code=404, detail="Assigned agent not found")
     
     agent_data = agent_res.data
+
+    should_queue = use_queue if use_queue is not None else settings.TASK_EXECUTION_MODE == "queue"
+    if should_queue:
+        queued = await TaskQueueService.queue_task(task_id)
+        if not queued or not queued.data:
+            raise HTTPException(status_code=500, detail="Task could not be queued")
+        await audit_service.log_action(
+            user_id=task.get("project", {}).get("owner_id"),
+            action="task_queued",
+            agent_id=agent_id,
+            task_id=task_id,
+            metadata={"project_id": task.get("project_id"), "source": "task_run_endpoint"},
+        )
+        return {"message": "Task queued for worker execution", "task_id": task_id, "mode": "queue"}
     
     # 4. Update task status to in_progress
     supabase.table("tasks").update({"status": "in_progress"}).eq("id", task_id).execute()
+    await audit_service.log_action(
+        user_id=task.get("project", {}).get("owner_id"),
+        action="task_run_started",
+        agent_id=agent_id,
+        task_id=task_id,
+        metadata={"project_id": task.get("project_id"), "mode": "direct"},
+    )
     
     # 5. Run in background
     background_tasks.add_task(AgentRunnerService.execute_agent_logic, task, agent_data)
@@ -90,19 +132,35 @@ async def approve_task(task_id: str):
     task_res = supabase.table("tasks").select("*").eq("id", task_id).single().execute()
     if not task_res.data:
         raise HTTPException(status_code=404, detail="Task not found")
+    _assert_task_project_is_mutable(task_res.data)
     _assert_task_quality(task_res.data)
     task = update_task_status(task_id, "done")
+    await audit_service.log_action(
+        user_id=None,
+        action="task_approved",
+        agent_id=task.get("assigned_agent_id"),
+        task_id=task_id,
+        metadata={"project_id": task.get("project_id")},
+    )
     return {"message": "Task approved", "task": task}
 
 @router.post("/{task_id}/reject")
 async def reject_task(task_id: str):
     task = update_task_status(task_id, "todo")
+    await audit_service.log_action(
+        user_id=None,
+        action="task_rejected",
+        agent_id=task.get("assigned_agent_id"),
+        task_id=task_id,
+        metadata={"project_id": task.get("project_id")},
+    )
     return {"message": "Task rejected", "task": task}
 @router.post("/project/{project_id}/approve-all")
 async def approve_all_tasks(project_id: str):
     """
     Approves all tasks in a project that are awaiting approval.
     """
+    _assert_project_is_mutable(project_id)
     waiting_tasks = (
         supabase.table("tasks")
         .select("*")
@@ -143,6 +201,16 @@ async def approve_all_tasks(project_id: str):
     tasks = task_result.data or []
     if tasks and all(task.get("status") == "done" for task in tasks):
         supabase.table("projects").update({"status": "completed"}).eq("id", project_id).execute()
+
+    await audit_service.log_action(
+        user_id=None,
+        action="tasks_approved_bulk",
+        metadata={
+            "project_id": project_id,
+            "approved_count": len(result_data),
+            "blocked_count": len(blocked),
+        },
+    )
     
     return {
         "message": f"Approved {len(result_data)} tasks",

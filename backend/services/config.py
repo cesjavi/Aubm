@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     
     # App Config
     TASK_QUEUE_EMBEDDED_WORKER: bool = True
+    TASK_EXECUTION_MODE: str = "direct"  # direct | queue
     OUTPUT_LANGUAGE: str = "en"
     PORT: int = 8000
     SENTRY_DSN: Optional[str] = None

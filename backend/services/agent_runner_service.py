@@ -8,6 +8,16 @@ from services.output_quality import build_quality_instructions, validate_output
 
 logger = logging.getLogger("agent_runner_service")
 
+def _update_task_run(run_id: str, payload: dict):
+    try:
+        return supabase.table("task_runs").update(payload).eq("id", run_id).execute()
+    except Exception as exc:
+        if "duration_seconds" in payload and "duration_seconds" in str(exc) and "schema cache" in str(exc):
+            fallback_payload = {key: value for key, value in payload.items() if key != "duration_seconds"}
+            logger.warning("task_runs.duration_seconds is missing in Supabase schema; retrying run update without duration.")
+            return supabase.table("task_runs").update(fallback_payload).eq("id", run_id).execute()
+        raise
+
 class AgentRunnerService:
     @staticmethod
     async def run_agent_task(
@@ -27,6 +37,13 @@ class AgentRunnerService:
 
         if update_task:
             supabase.table("tasks").update({"status": "in_progress"}).eq("id", task_id).execute()
+            await audit_service.log_action(
+                user_id=None,
+                action="task_status_changed",
+                agent_id=agent_data.get("id"),
+                task_id=task_id,
+                metadata={"project_id": project_id, "status": "in_progress"},
+            )
 
         try:
             run_res = supabase.table("task_runs").insert({
@@ -35,6 +52,13 @@ class AgentRunnerService:
                 "status": "running"
             }).execute()
             run_id = run_res.data[0]["id"]
+            await audit_service.log_action(
+                user_id=None,
+                action="task_run_created",
+                agent_id=agent_data.get("id"),
+                task_id=task_id,
+                metadata={"project_id": project_id, "run_id": run_id, "status": "running"},
+            )
 
             agent = AgentFactory.get_agent(
                 provider=agent_data["api_provider"],
@@ -97,6 +121,23 @@ class AgentRunnerService:
                         "status": "awaiting_approval",
                         "output_data": cached_result
                     }).eq("id", task_id).execute()
+                    await audit_service.log_action(
+                        user_id=None,
+                        action="task_status_changed",
+                        agent_id=agent_data.get("id"),
+                        task_id=task_id,
+                        metadata={
+                            "project_id": project_id,
+                            "run_id": run_id,
+                            "status": "awaiting_approval",
+                            "cache_hit": True,
+                        },
+                    )
+
+                _update_task_run(run_id, {
+                    "status": "completed",
+                    "finished_at": datetime.now(timezone.utc).isoformat()
+                })
                 
                 return cached_result, run_id
 
@@ -138,13 +179,25 @@ class AgentRunnerService:
                     "status": "awaiting_approval",
                     "output_data": result
                 }).eq("id", task_id).execute()
+                await audit_service.log_action(
+                    user_id=None,
+                    action="task_status_changed",
+                    agent_id=agent_data.get("id"),
+                    task_id=task_id,
+                    metadata={
+                        "project_id": project_id,
+                        "run_id": run_id,
+                        "status": "awaiting_approval",
+                        "quality_approved": quality_review["approved"],
+                    },
+                )
 
             # 7. Update Run Status
-            supabase.table("task_runs").update({
+            _update_task_run(run_id, {
                 "status": "completed",
                 "finished_at": datetime.now(timezone.utc).isoformat(),
                 "duration_seconds": round(duration, 2)
-            }).eq("id", run_id).execute()
+            })
 
             # 8. Log Completion with Metrics
             supabase.table("agent_logs").insert({
@@ -161,22 +214,45 @@ class AgentRunnerService:
                     "action": "quality_review_failed",
                     "content": f"Quality review failed: {', '.join(quality_review['fail_reasons'])}"
                 }).execute()
+                await audit_service.log_action(
+                    user_id=None,
+                    action="task_quality_review_failed",
+                    agent_id=agent_data.get("id"),
+                    task_id=task_id,
+                    metadata={
+                        "project_id": project_id,
+                        "run_id": run_id,
+                        "fail_reasons": quality_review.get("fail_reasons", []),
+                    },
+                )
 
             return result, run_id
 
         except Exception as e:
             logger.error(f"Error executing task {task_id}: {str(e)}")
             if run_id:
-                supabase.table("task_runs").update({
+                _update_task_run(run_id, {
                     "status": "failed",
                     "finished_at": datetime.now(timezone.utc).isoformat()
-                }).eq("id", run_id).execute()
+                })
             
             if update_task:
                 supabase.table("tasks").update({
                     "status": "failed",
                     "output_data": {"error": str(e)}
                 }).eq("id", task_id).execute()
+                await audit_service.log_action(
+                    user_id=None,
+                    action="task_status_changed",
+                    agent_id=agent_data.get("id"),
+                    task_id=task_id,
+                    metadata={
+                        "project_id": project_id,
+                        "run_id": run_id,
+                        "status": "failed",
+                        "error": str(e),
+                    },
+                )
 
             # LOG ERROR TO AGENT CONSOLE
             supabase.table("agent_logs").insert({

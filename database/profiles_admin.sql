@@ -88,7 +88,7 @@ BEGIN
                 )
             )
             WITH CHECK (
-                role IN ('user', 'admin')
+                role IN ('user', 'manager', 'admin')
                 AND EXISTS (
                     SELECT 1
                     FROM public.profiles admin_profile

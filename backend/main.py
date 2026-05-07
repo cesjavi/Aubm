@@ -1,11 +1,15 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
+import asyncio
+import logging
 import os
 import json
 from pathlib import Path
 from dotenv import load_dotenv
 import sentry_sdk
+from services.config import settings
+from worker import AubmWorker
 
 
 def _load_app_version() -> str:
@@ -21,6 +25,9 @@ def _load_app_version() -> str:
 load_dotenv()
 FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 APP_VERSION = _load_app_version()
+logger = logging.getLogger("aubm.api")
+embedded_worker: AubmWorker | None = None
+embedded_worker_task: asyncio.Task | None = None
 
 # Sentry Initialization
 SENTRY_DSN = os.getenv("SENTRY_DSN")
@@ -47,6 +54,54 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def _log_embedded_worker_result(task: asyncio.Task) -> None:
+    if task.cancelled():
+        return
+
+    exc = task.exception()
+    if exc:
+        logger.error(
+            "Embedded worker stopped unexpectedly",
+            exc_info=(type(exc), exc, exc.__traceback__),
+        )
+
+
+@app.on_event("startup")
+async def start_embedded_worker() -> None:
+    global embedded_worker, embedded_worker_task
+
+    if settings.TASK_EXECUTION_MODE != "queue" or not settings.TASK_QUEUE_EMBEDDED_WORKER:
+        return
+
+    if embedded_worker_task and not embedded_worker_task.done():
+        return
+
+    embedded_worker = AubmWorker()
+    embedded_worker_task = asyncio.create_task(embedded_worker.start())
+    embedded_worker_task.add_done_callback(_log_embedded_worker_result)
+    logger.info("Embedded task worker started: %s", embedded_worker.worker_id)
+
+
+@app.on_event("shutdown")
+async def stop_embedded_worker() -> None:
+    global embedded_worker, embedded_worker_task
+
+    if not embedded_worker or not embedded_worker_task:
+        return
+
+    embedded_worker.stop()
+    try:
+        await asyncio.wait_for(embedded_worker_task, timeout=10)
+        await embedded_worker.heartbeat("stopping")
+    except asyncio.TimeoutError:
+        embedded_worker_task.cancel()
+        logger.warning("Embedded task worker did not stop before timeout")
+    finally:
+        embedded_worker = None
+        embedded_worker_task = None
+
 
 @app.get("/")
 async def root():
@@ -98,5 +153,4 @@ async def serve_frontend(path: str):
 
 if __name__ == "__main__":
     import uvicorn
-    from services.config import settings
     uvicorn.run("main:app", host="0.0.0.0", port=settings.PORT, reload=True)

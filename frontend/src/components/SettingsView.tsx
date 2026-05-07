@@ -10,10 +10,18 @@ import { supabase } from '../services/supabase';
 
 interface ProfileRow {
   id: string;
-  role: 'user' | 'manager' | 'admin';
+  role: UserRole;
   full_name: string | null;
   avatar_url: string | null;
 }
+
+type UserRole = 'user' | 'manager' | 'admin';
+
+const roleOptions: Array<{ value: UserRole; label: string }> = [
+  { value: 'user', label: 'User' },
+  { value: 'manager', label: 'Manager' },
+  { value: 'admin', label: 'Admin' }
+];
 
 const SettingsView: React.FC<{ uiMode: UiMode; onUiModeChange: (mode: UiMode) => void }> = ({ uiMode, onUiModeChange }) => {
   const { user, session, profile, signOut, refreshProfile } = useAuth();
@@ -100,7 +108,7 @@ const SettingsView: React.FC<{ uiMode: UiMode; onUiModeChange: (mode: UiMode) =>
     setSavingProfile(false);
   };
 
-  const updateUserRole = async (profileId: string, role: 'user' | 'admin') => {
+  const updateUserRole = async (profileId: string, role: UserRole) => {
     setAdminMessage(null);
     const { error } = await supabase
       .from('profiles')
@@ -247,11 +255,12 @@ const SettingsView: React.FC<{ uiMode: UiMode; onUiModeChange: (mode: UiMode) =>
                   </div>
                   <select
                     value={entry.role}
-                    onChange={(event) => updateUserRole(entry.id, event.target.value as 'user' | 'admin')}
+                    onChange={(event) => updateUserRole(entry.id, event.target.value as UserRole)}
                     style={{ maxWidth: '160px' }}
                   >
-                    <option value="user">User</option>
-                    <option value="admin">Admin</option>
+                    {roleOptions.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
                   </select>
                 </div>
               ))}

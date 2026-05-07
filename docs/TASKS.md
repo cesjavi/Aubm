@@ -1,101 +1,96 @@
-# Project Tasks: Aubm Implementation
+# Aubm Implementation Tasks
 
-This file tracks the granular implementation steps for the Aubm platform, following the [ROADMAP.md](./ROADMAP.md) and [SPEC.md](./SPEC.md).
+This file tracks implementation work against [ROADMAP.md](../ROADMAP.md) and [SPEC.md](../SPEC.md). Status is conservative.
 
-## Phase 1: Core Foundation
+Legend:
 
-### 1.1 Project Initialization
-- [x] Create directory structure (`backend/`, `frontend/`, `database/`)
-- [x] Initialize Python virtual environment in `backend/`
-- [x] Initialize Vite + React + TS project in `frontend/`
-- [x] Create `backend/requirements.txt` with core dependencies
-- [x] Create `frontend/package.json` and install dependencies
+- `[x]` Completed
+- `[/]` Partial or in progress
+- `[ ]` Pending
 
-### 1.2 Database & Schema
-- [x] Create `database/schema.sql` based on SPEC.md
-- [x] Set up Supabase project
-- [x] Implement initial seed data for `agents` and `app_config`
+## Completed Foundation
 
-### 1.3 Backend Core
-- [x] Implement `backend/main.py` entrypoint
-- [x] Create `backend/services/config.py` for environment management
-- [x] Implement `backend/agents/base.py`
-- [x] Implement first agent providers (`OpenAIAgent`, `AMDAgent`)
-- [x] Implement `backend/routers/agent_runner.py` for task execution
+- [x] Create backend, frontend, and database directories.
+- [x] Implement FastAPI backend entrypoint.
+- [x] Implement React/Vite frontend shell.
+- [x] Add Supabase Auth integration.
+- [x] Add baseline Supabase schema and RLS policies.
+- [x] Implement provider-based agent factory.
+- [x] Implement project dashboard.
+- [x] Implement project detail task list and task forms.
+- [x] Implement task approval and rejection.
+- [x] Implement final report, brief, pessimistic analysis, and PDF export.
+- [x] Implement completed-project locking in frontend and backend mutation endpoints.
 
-### 1.4 Frontend Core
-- [x] Set up CSS design system
-- [x] Implement Supabase Auth integration
-- [x] Create app layout with sidebar and header
-- [x] Build project dashboard view
+## Product Workflow
 
-## Phase 2: Advanced Collaboration & Tools
+- [x] Add Guided and Expert UI modes.
+- [x] Add project creation wizard for Guided mode.
+- [x] Add project creation wizard for Expert mode.
+- [x] Add project source inputs: links, notes, and file references.
+- [x] Add dashboard search, filters, and sorting.
+- [x] Add project roadmap modal inferred from tasks.
+- [x] Add retry handling for failed/error-output tasks.
+- [x] Add legal example projects.
+- [x] Add dashboard card alignment fixes.
 
-### 2.1 Extended Toolbelt
-- [x] Implement `BrowserTool` using Playwright
-- [x] Create `ToolRegistry` for agent access
-- [x] Implement `CodeSandboxTool`
-- [x] Add file generation capabilities
+## Agents and Marketplace
 
-### 2.2 Multi-Agent Features
-- [x] Implement debate logic
-- [x] Create peer review status/dashboard for tasks
+- [x] Add custom agent management UI.
+- [x] Add marketplace table and seed templates.
+- [x] Add marketplace search and deploy flow.
+- [x] Prevent duplicate template deploys per user where possible.
+- [x] Add default agents flow.
+- [ ] Add richer marketplace categories, filters, and template detail pages.
 
-### 2.3 Real-Time Collaboration
-- [x] Implement collaborative output editor
-- [ ] Real-time cursor/presence indicators
+## Security and Roles
 
-### 2.4 Mobile Experience
-- [x] Initialize Capacitor in the frontend project
-- [ ] Add Android/iOS platform scaffolding
+- [x] Add profile roles: `user`, `manager`, `admin`.
+- [x] Add admin user management support for manager role.
+- [x] Hide Google/GitHub auth buttons in the current login UI.
+- [x] Fix recursive profile admin policies with SECURITY DEFINER helper.
+- [/] Expand audit logging coverage across all LLM and workflow events.
+- [x] Add audit events for task run, queue, retry, approval, debate, decomposition, and report generation paths.
+- [x] Add audit trigger migration for direct project, task, agent, and profile mutations.
+- [ ] Move direct frontend mutations behind backend APIs where stricter authorization or validation is required.
+- [ ] Define enterprise auth policy before exposing OAuth buttons again.
+- [ ] Replace broad team/security claims with tested team membership flows.
 
-## Phase 3: Intelligence & Scale
+## Queue and Scale
 
-### 3.1 Advanced Analytics & Security
-- [x] Implement audit logs for LLM interaction tracking
-- [x] Add feedback loop for fine-tuning data collection
-- [x] Implement SSO integration through Supabase
-- [x] Implement granular RLS for project teams
+- [x] Add `backend/worker.py` scaffold.
+- [x] Add `backend/services/task_queue.py`.
+- [x] Add `queued` status support to `tasks`.
+- [x] Add `database/add_task_queued_status.sql`.
+- [x] Add queue leasing metadata and `claim_next_queued_task`.
+- [x] Update worker to use atomic task claiming.
+- [x] Add worker heartbeat table and monitoring counts.
+- [x] Show queued, running, active workers, and stale leases in Monitoring.
+- [x] Add retry delay/backoff with `next_attempt_at`.
+- [x] Show delayed retries in Monitoring.
+- [x] Add queue execution mode to task and project run endpoints.
+- [x] Start an embedded worker from FastAPI when queue mode is enabled.
+- [x] Store queue attempts and terminal failure reason.
+- [ ] Make queue execution the default after worker retry/backoff is hardened.
 
-### 3.2 Recursive Autonomy
-- [x] Implement project decomposition
-- [x] Create agent marketplace schema and gallery UI
+## Data Quality and Evidence
 
-## Phase 4: Autonomy & Beyond
+- [x] Add heuristic output guardrails.
+- [x] Add final-report filtering for low-quality or placeholder sections.
+- [/] Require source URLs heuristically for sensitive factual claims.
+- [ ] Add strict JSON task schemas per task type.
+- [ ] Add claim table or normalized evidence model.
+- [ ] Add mandatory `source_url` for competitor, pricing, benchmark, release, market, and revenue claims.
+- [ ] Add entity normalization and alias merging.
+- [ ] Add semantic deduplication.
+- [ ] Build evidence-aware final report from validated claims only.
 
-### 4.1 System Self-Healing
-- [x] Implement health check agents
-- [x] Create restricted autonomous patching logic
+## Documentation
 
-### 4.2 Next-Gen Interfaces
-- [x] Voice control integration
-- [x] Scaffolding for VR/AR project viewer
-
-## Phase 5: Production Operations
-
-### 5.1 Observability
-- [x] Add backend monitoring summary endpoint
-- [x] Add frontend operations monitoring dashboard
-- [x] Add external error tracking integration
-
-### 5.2 Deployment Hardening
-- [x] Add Dockerfile and production server command
-- [x] Replace wildcard CORS with environment-driven allowlist
-- [x] Add frontend bundle splitting/performance budget
-
-## Phase 6: Distributed Scale & Intelligence
-
-### 6.1 Asynchronous Workers
-- [/] Implement `backend/worker.py` for task consumption
-- [/] Implement `backend/services/task_queue.py` using a lightweight polling or webhook mechanism
-
-### 6.2 Advanced Memory
-- [ ] Set up pgvector extension in Supabase
-- [ ] Implement semantic retrieval service for cross-project context
-
-### 6.3 Self-Optimization
-- [ ] Create agent "reflection" router to analyze task history
-- [ ] Implement automated system prompt refinement logic
-
----
-*Legend: Pending | In Progress | Completed*
+- [x] Update ROADMAP.md with conservative status.
+- [x] Update README.md.
+- [x] Update SPEC.md.
+- [x] Update operating guide.
+- [x] Update task tracker.
+- [x] Add a migration guide for existing Supabase projects.
+- [ ] Add API endpoint reference.

@@ -44,13 +44,64 @@ CREATE TABLE IF NOT EXISTS public.tasks (
     assigned_agent_id UUID REFERENCES public.agents ON DELETE SET NULL,
     title TEXT NOT NULL,
     description TEXT,
-    status TEXT CHECK (status IN ('todo', 'in_progress', 'awaiting_approval', 'done', 'failed', 'cancelled')) DEFAULT 'todo',
+    status TEXT CHECK (status IN ('todo', 'queued', 'in_progress', 'awaiting_approval', 'done', 'failed', 'cancelled')) DEFAULT 'todo',
     priority INTEGER DEFAULT 0,
     is_critical BOOLEAN DEFAULT FALSE,
     output_data JSONB,
+    queued_at TIMESTAMPTZ,
+    leased_at TIMESTAMPTZ,
+    lease_expires_at TIMESTAMPTZ,
+    next_attempt_at TIMESTAMPTZ,
+    queue_worker_id TEXT,
+    queue_attempts INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+CREATE INDEX IF NOT EXISTS tasks_queue_claim_idx
+ON public.tasks (status, priority DESC, next_attempt_at, queued_at, created_at)
+WHERE status = 'queued';
+
+CREATE OR REPLACE FUNCTION public.claim_next_queued_task(
+  worker_id TEXT DEFAULT NULL,
+  lease_seconds INTEGER DEFAULT 300,
+  max_attempts INTEGER DEFAULT 3
+)
+RETURNS SETOF public.tasks
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  RETURN QUERY
+  WITH candidate AS (
+    SELECT id
+    FROM public.tasks
+    WHERE status = 'queued'
+      AND COALESCE(queue_attempts, 0) < max_attempts
+      AND (lease_expires_at IS NULL OR lease_expires_at < NOW())
+      AND (next_attempt_at IS NULL OR next_attempt_at <= NOW())
+    ORDER BY priority DESC, COALESCE(next_attempt_at, queued_at, created_at), COALESCE(queued_at, created_at), created_at
+    FOR UPDATE SKIP LOCKED
+    LIMIT 1
+  )
+  UPDATE public.tasks AS task
+  SET
+    status = 'in_progress',
+    queue_attempts = COALESCE(task.queue_attempts, 0) + 1,
+    leased_at = NOW(),
+    lease_expires_at = NOW() + MAKE_INTERVAL(secs => lease_seconds),
+    queue_worker_id = worker_id,
+    updated_at = NOW()
+  FROM candidate
+  WHERE task.id = candidate.id
+  RETURNING task.*;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.claim_next_queued_task(TEXT, INTEGER, INTEGER) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.claim_next_queued_task(TEXT, INTEGER, INTEGER) TO service_role;
 
 -- 5. Task Runs (Execution History)
 CREATE TABLE IF NOT EXISTS public.task_runs (
@@ -59,6 +110,7 @@ CREATE TABLE IF NOT EXISTS public.task_runs (
     agent_id UUID REFERENCES public.agents ON DELETE SET NULL,
     status TEXT CHECK (status IN ('queued', 'running', 'completed', 'failed', 'cancelled')) DEFAULT 'queued',
     error_message TEXT,
+    duration_seconds NUMERIC(10, 2),
     created_at TIMESTAMPTZ DEFAULT NOW(),
     finished_at TIMESTAMPTZ
 );
@@ -74,7 +126,19 @@ CREATE TABLE IF NOT EXISTS public.agent_logs (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 7. App Config (Global Settings)
+-- 7. Worker Heartbeats
+CREATE TABLE IF NOT EXISTS public.worker_heartbeats (
+    worker_id TEXT PRIMARY KEY,
+    status TEXT CHECK (status IN ('starting', 'idle', 'processing', 'stopping', 'error')) DEFAULT 'starting',
+    current_task_id UUID REFERENCES public.tasks ON DELETE SET NULL,
+    processed_count INTEGER NOT NULL DEFAULT 0,
+    failed_count INTEGER NOT NULL DEFAULT 0,
+    metadata JSONB,
+    started_at TIMESTAMPTZ DEFAULT NOW(),
+    last_seen_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 8. App Config (Global Settings)
 CREATE TABLE IF NOT EXISTS public.app_config (
     key TEXT PRIMARY KEY,
     value JSONB,
@@ -88,7 +152,13 @@ ALTER TABLE public.agents ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.tasks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.task_runs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.agent_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.worker_heartbeats ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.app_config ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Service role can manage worker heartbeats" ON public.worker_heartbeats
+    FOR ALL TO service_role
+    USING (true)
+    WITH CHECK (true);
 
 -- Basic Policies (To be refined)
 -- Projects: Owners can do anything, others can read if public

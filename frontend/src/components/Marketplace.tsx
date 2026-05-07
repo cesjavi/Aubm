@@ -18,24 +18,60 @@ interface AgentTemplate {
 const Marketplace: React.FC = () => {
   const [templates, setTemplates] = useState<AgentTemplate[]>([]);
   const [search, setSearch] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [deployingId, setDeployingId] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchTemplates = async () => {
-      const { data } = await supabase.from('agent_templates').select('*');
-      if (data) setTemplates(data);
+      setLoading(true);
+      setError(null);
+      const { data, error: templateError } = await supabase
+        .from('agent_templates')
+        .select('*')
+        .order('category', { ascending: true })
+        .order('name', { ascending: true });
+
+      if (templateError) {
+        setError(templateError.message);
+      } else {
+        setTemplates(data ?? []);
+      }
+      setLoading(false);
     };
     fetchTemplates();
   }, []);
 
   const handleDeploy = async (template: AgentTemplate) => {
+    setMessage(null);
+    setError(null);
+    setDeployingId(template.id);
+
     const { data: userData } = await supabase.auth.getUser();
     if (!userData.user) {
-      alert('Please log in to deploy agents.');
+      setError('Please log in to deploy agents.');
+      setDeployingId(null);
       return;
     }
 
     try {
-      const { error } = await supabase.from('agents').insert({
+      const { data: existingAgent, error: lookupError } = await supabase
+        .from('agents')
+        .select('id')
+        .eq('user_id', userData.user.id)
+        .eq('name', template.name)
+        .eq('role', template.role)
+        .limit(1)
+        .maybeSingle();
+
+      if (lookupError) throw lookupError;
+      if (existingAgent) {
+        setMessage(`${template.name} is already in your agent fleet.`);
+        return;
+      }
+
+      const { error: insertError } = await supabase.from('agents').insert({
         user_id: userData.user.id,
         name: template.name,
         role: template.role,
@@ -44,16 +80,18 @@ const Marketplace: React.FC = () => {
         system_prompt: template.system_prompt
       });
 
-      if (error) throw error;
-      alert(`${template.name} has been added to your agent fleet!`);
+      if (insertError) throw insertError;
+      setMessage(`${template.name} has been added to your agent fleet.`);
     } catch (e) {
       const message =
         e instanceof Error
           ? e.message
           : typeof e === 'object' && e !== null && 'message' in e
-            ? String((e as { message?: unknown }).message)
-            : 'Unknown error';
-      alert(`Failed to deploy agent: ${message}`);
+          ? String((e as { message?: unknown }).message)
+          : 'Unknown error';
+      setError(`Failed to deploy agent: ${message}`);
+    } finally {
+      setDeployingId(null);
     }
   };
 
@@ -85,6 +123,16 @@ const Marketplace: React.FC = () => {
         </div>
       </div>
 
+      {error && <div className="inline-status modal-error">{error}</div>}
+      {message && <div className="inline-status"><span>{message}</span></div>}
+      {loading && <div className="inline-status">Loading marketplace templates...</div>}
+      {!loading && filteredTemplates.length === 0 && (
+        <div className="glass-panel empty-state">
+          <h3>No templates found</h3>
+          <p>{search ? 'Try a different search term.' : 'Apply database/marketplace.sql in Supabase to seed marketplace templates.'}</p>
+        </div>
+      )}
+
       <div className="marketplace-grid">
         {filteredTemplates.map((template, i) => (
           <motion.div 
@@ -112,9 +160,14 @@ const Marketplace: React.FC = () => {
 
             <div className="marketplace-card-footer">
               <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{template.model}</span>
-              <button className="btn btn-glass" style={{ padding: '0.5rem 1rem' }} onClick={() => handleDeploy(template)}>
+              <button
+                className="btn btn-glass"
+                style={{ padding: '0.5rem 1rem' }}
+                onClick={() => handleDeploy(template)}
+                disabled={deployingId === template.id}
+              >
                 <Download size={16} />
-                Deploy
+                {deployingId === template.id ? 'Deploying...' : 'Deploy'}
               </button>
             </div>
           </motion.div>

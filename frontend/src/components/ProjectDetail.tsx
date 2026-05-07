@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { ArrowLeft, Bot, CheckCircle2, Download, FilePenLine, FileText, ListTodo, PlayCircle, PlusCircle, RefreshCw, Trash2, X } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { ArrowLeft, Bot, CheckCircle2, Download, FilePenLine, FileText, ListTodo, Map as MapIcon, PlayCircle, PlusCircle, RefreshCw, Trash2, X } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { supabase } from '../services/supabase';
 import { useAuth } from '../context/useAuth';
@@ -37,18 +37,6 @@ interface TaskDependency {
   depends_on_task_id: string;
 }
 
-interface ChartDatum {
-  label: string;
-  value: number;
-}
-
-interface ReportCharts {
-  status: ChartDatum[];
-  priorities: ChartDatum[];
-  categories: ChartDatum[];
-  scores: ChartDatum[];
-}
-
 interface ProjectDetailProps {
   projectId: string;
   uiMode: UiMode;
@@ -74,6 +62,9 @@ const ensureBackendOk = async (response: Response, fallback?: string) => {
   }
 };
 
+const hasTaskErrorOutput = (task: Task) =>
+  Boolean(task.output_data && typeof task.output_data === 'object' && 'error' in task.output_data);
+
 const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initialTaskId = null, onBack }) => {
   const { user } = useAuth();
   const [project, setProject] = useState<Project | null>(null);
@@ -95,9 +86,10 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
   const [filter, setFilter] = useState<string>('all');
   const [taskActionError, setTaskActionError] = useState<string | null>(null);
   const [taskActionPending, setTaskActionPending] = useState(false);
+  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [finalReport, setFinalReport] = useState<string | null>(null);
   const [finalReportVariant, setFinalReportVariant] = useState<'full' | 'brief' | 'pessimistic'>('full');
-  const [reportCharts, setReportCharts] = useState<ReportCharts | null>(null);
+  const [showRoadmap, setShowRoadmap] = useState(false);
   const [reportLoading, setReportLoading] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
   const defaultProvider = getDefaultProvider();
@@ -197,7 +189,11 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
     setDependencyIds([]);
   };
 
-  const startEditingTask = (task: Task) => {
+  const startEditingTask = useCallback((task: Task) => {
+    if (project?.status === 'completed') {
+      setError('Completed projects are locked. Tasks cannot be edited.');
+      return;
+    }
     setEditingTaskId(task.id);
     setTitle(task.title);
     setDescription(task.description ?? '');
@@ -205,7 +201,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
     setDependencyIds(dependencyMap(task.id));
     setError(null);
     setMessage(null);
-  };
+  }, [dependencyMap, project?.status]);
 
   useEffect(() => {
     if (!initialTaskId || tasks.length === 0) return;
@@ -216,7 +212,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
         setSelectedTask(task);
       }
     }
-  }, [initialTaskId, tasks]);
+  }, [initialTaskId, startEditingTask, tasks]);
 
   const saveTaskDependencies = async (taskId: string, selectedDependencyIds: string[]) => {
     if (!dependencyTableAvailable) return null;
@@ -249,6 +245,10 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
 
   const createTask = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (!canModifyProject) {
+      setError('Completed projects are locked. Create a new project or reopen this one before adding tasks.');
+      return;
+    }
     setSaving(true);
     setError(null);
     setMessage(null);
@@ -290,6 +290,10 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
   };
 
   const handleDeleteTask = async (task: Task) => {
+    if (!canModifyProject) {
+      setError('Completed projects are locked. Tasks cannot be deleted.');
+      return;
+    }
     const confirmed = window.confirm(`Delete task "${task.title}"? This cannot be undone.`);
     if (!confirmed) return;
 
@@ -314,6 +318,10 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
   };
 
   const assignTaskAgent = async (taskId: string, assignedAgentId: string) => {
+    if (!canModifyProject) {
+      setError('Completed projects are locked. Task assignments cannot be changed.');
+      return;
+    }
     setError(null);
     setMessage(null);
 
@@ -336,6 +344,10 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
   };
 
   const createDefaultAgents = async () => {
+    if (!canModifyProject) {
+      setError('Completed projects are locked. Agents cannot be generated from this project.');
+      return;
+    }
     if (!user) {
       setError('You must be signed in to create default agents.');
       return;
@@ -365,31 +377,28 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
   };
 
   const runOrchestrator = async () => {
-    if (tasks.length > 0) {
-      const confirmReset = window.confirm(
-        "This project already has tasks. Re-orchestrating will delete all existing tasks and progress to generate a fresh plan. Do you want to continue?"
-      );
-      if (!confirmReset) return;
-      
-      // Clear existing tasks for a fresh start
-      setOrchestrating(true);
-      setError(null);
-      setMessage(null);
-      try {
-        const { error: deleteError } = await supabase.from('tasks').delete().eq('project_id', projectId);
-        if (deleteError) throw deleteError;
-      } catch (err: any) {
-        setError(`Failed to clear existing tasks: ${err.message}`);
-        setOrchestrating(false);
-        return;
-      }
+    if (!canModifyProject) {
+      setError('Completed projects are locked. The orchestrator cannot add or rerun tasks.');
+      return;
     }
-
     setOrchestrating(true);
     setError(null);
     setMessage(null);
 
     try {
+      const errorOutputTaskIds = tasks
+        .filter((task) => hasTaskErrorOutput(task))
+        .map((task) => task.id);
+
+      if (errorOutputTaskIds.length > 0) {
+        const { error: resetError } = await supabase
+          .from('tasks')
+          .update({ status: 'todo', output_data: null })
+          .in('id', errorOutputTaskIds);
+
+        if (resetError) throw resetError;
+      }
+
       const apiUrl = getApiUrl();
       const response = await fetch(`${apiUrl}/orchestrator/projects/${projectId}/run`, {
         method: 'POST'
@@ -399,7 +408,8 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
         response,
         `Backend returned ${response.status} for POST /orchestrator/projects/${projectId}/run. Stop the stale process on port 8000 and restart backend from D:\\sistemas\\Aubm\\backend.`
       );
-      setMessage('Project orchestrator started.');
+      const body = await response.json().catch(() => null);
+      setMessage(body?.mode === 'queue' ? 'Project tasks queued for worker execution.' : 'Project orchestrator started for queued and failed tasks.');
       // Refresh after a delay to show the new tasks
       window.setTimeout(loadProject, 2000);
     } catch (exc) {
@@ -409,8 +419,42 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
       window.setTimeout(() => setOrchestrating(false), 2000);
     }
   };
+
+  const retryTask = async (task: Task) => {
+    if (!canModifyProject) {
+      setTaskActionError('Completed projects are locked. This task cannot be retried.');
+      return;
+    }
+    setTaskActionPending(true);
+    setTaskActionError(null);
+    setError(null);
+    setMessage(null);
+
+    try {
+      const { error: resetError } = await supabase
+        .from('tasks')
+        .update({ status: 'todo', output_data: null })
+        .eq('id', task.id);
+
+      if (resetError) throw resetError;
+
+      setSelectedTask(null);
+      await loadProject();
+      await runOrchestrator();
+      setMessage('Task reset and queued for retry.');
+    } catch (exc) {
+      setTaskActionError(`Could not retry task: ${exc instanceof Error ? exc.message : 'Unknown error'}`);
+    } finally {
+      setTaskActionPending(false);
+    }
+  };
+
   const handleApproveAll = async () => {
     if (!projectId) return;
+    if (!canModifyProject) {
+      setError('Completed projects are locked. Pending approvals cannot be changed.');
+      return;
+    }
     setApprovingAll(true);
     setError(null);
     setMessage(null);
@@ -429,12 +473,52 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
     }
     setApprovingAll(false);
   };
-
-  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const allTasksApproved = tasks.length > 0 && tasks.every((task) => task.status === 'done');
   const taskLookup = new Map(tasks.map((task) => [task.id, task]));
   const tasksAwaitingApproval = tasks.filter((task) => task.status === 'awaiting_approval').length;
   const completedTasks = tasks.filter((task) => task.status === 'done').length;
+  const retryableTasks = tasks.filter((task) => task.status === 'failed' || hasTaskErrorOutput(task)).length;
+  const isProjectCompleted = project?.status === 'completed';
+  const canModifyProject = !isProjectCompleted;
+  const roadmapPhases = useMemo(() => {
+    const orderedPhases = [
+      'Foundation',
+      'Build',
+      'Execution',
+      'Review',
+      'Recovery',
+      'Finalize',
+      'Completed'
+    ];
+    const phaseMap = new Map<string, Task[]>();
+    const dependencyCounts = dependencies.reduce<Record<string, number>>((acc, dependency) => {
+      acc[dependency.task_id] = (acc[dependency.task_id] ?? 0) + 1;
+      return acc;
+    }, {});
+    const blockerCounts = dependencies.reduce<Record<string, number>>((acc, dependency) => {
+      acc[dependency.depends_on_task_id] = (acc[dependency.depends_on_task_id] ?? 0) + 1;
+      return acc;
+    }, {});
+
+    for (const task of tasks) {
+      let phase = 'Build';
+      if (task.status === 'done') phase = 'Completed';
+      else if (task.status === 'awaiting_approval') phase = 'Review';
+      else if (task.status === 'queued' || task.status === 'in_progress') phase = 'Execution';
+      else if (task.status === 'failed') phase = 'Recovery';
+      else if ((dependencyCounts[task.id] ?? 0) === 0) phase = 'Foundation';
+      else if ((blockerCounts[task.id] ?? 0) === 0) phase = 'Finalize';
+
+      phaseMap.set(phase, [...(phaseMap.get(phase) ?? []), task]);
+    }
+
+    return orderedPhases
+      .map((phase) => ({
+        phase,
+        tasks: (phaseMap.get(phase) ?? []).sort((a, b) => b.priority - a.priority || a.title.localeCompare(b.title))
+      }))
+      .filter((item) => item.tasks.length > 0);
+  }, [dependencies, tasks]);
 
   const humanizeKey = (key: string) => key.replace(/[_-]/g, ' ').trim().replace(/\b\w/g, (char) => char.toUpperCase());
 
@@ -502,6 +586,10 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
   };
 
   const approveTask = async (taskId: string) => {
+    if (!canModifyProject) {
+      setTaskActionError('Completed projects are locked. Task approval cannot be changed.');
+      return;
+    }
     setTaskActionPending(true);
     setTaskActionError(null);
     setError(null);
@@ -520,6 +608,10 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
   };
 
   const rejectTask = async (taskId: string) => {
+    if (!canModifyProject) {
+      setTaskActionError('Completed projects are locked. Task approval cannot be changed.');
+      return;
+    }
     setTaskActionPending(true);
     setTaskActionError(null);
     setError(null);
@@ -550,7 +642,6 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
 
       const body = await response.json();
       setFinalReport(body.report);
-      setReportCharts(body.charts ?? null);
       setFinalReportVariant(variant);
       await loadProject();
     } catch (exc) {
@@ -559,41 +650,6 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
       setReportLoading(false);
     }
   };
-
-  const renderBarChart = (title: string, data: ChartDatum[]) => {
-    const maxValue = Math.max(...data.map((item) => item.value), 1);
-    return (
-      <div className="report-chart">
-        <h4>{title}</h4>
-        {data.map((item) => (
-          <div key={item.label} className="report-chart-row">
-            <span>{item.label}</span>
-            <div className="report-chart-track">
-              <div className="report-chart-fill" style={{ width: `${(item.value / maxValue) * 100}%` }} />
-            </div>
-            <strong>{item.value}</strong>
-          </div>
-        ))}
-      </div>
-    );
-  };
-
-  const renderScoreChart = (data: ChartDatum[]) => (
-    <div className="report-chart report-score-chart">
-      <h4>Scores</h4>
-      <div className="report-score-grid">
-        {data.map((item) => (
-          <div key={item.label} className="report-score">
-            <span>{item.label}</span>
-            <strong>{item.value}</strong>
-            <div className="report-chart-track">
-              <div className="report-chart-fill" style={{ width: `${Math.min(item.value, 100)}%` }} />
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
 
   const downloadFinalReportPdf = async () => {
     setPdfLoading(true);
@@ -633,6 +689,12 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
           <p style={{ color: 'var(--text-dim)' }}>{project?.description || 'No description provided.'}</p>
         </div>
         <div className="button-row">
+          {tasks.length > 0 && (
+            <button className="btn btn-glass" onClick={() => setShowRoadmap(true)}>
+              <MapIcon size={18} />
+              Roadmap
+            </button>
+          )}
           {allTasksApproved && (
             <button className="btn btn-primary" onClick={() => openFinalReport('full')} disabled={reportLoading}>
               <FileText size={18} />
@@ -651,16 +713,18 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
               Pessimistic Analysis
             </button>
           )}
-          {tasks.some(t => t.status === 'awaiting_approval') && (
+          {canModifyProject && tasks.some(t => t.status === 'awaiting_approval') && (
             <button className="btn btn-glass" onClick={handleApproveAll} disabled={approvingAll} style={{ borderColor: 'var(--success)', color: 'var(--success)' }}>
               <CheckCircle2 size={18} />
               {approvingAll ? 'Approving...' : 'Approve All'}
             </button>
           )}
-          <button className="btn btn-primary" onClick={runOrchestrator} disabled={orchestrating}>
-            <PlayCircle size={18} />
-            {orchestrating ? 'Starting...' : 'Run Orchestrator'}
-          </button>
+          {canModifyProject && (
+            <button className="btn btn-primary" onClick={runOrchestrator} disabled={orchestrating}>
+              <PlayCircle size={18} />
+              {orchestrating ? 'Starting...' : retryableTasks > 0 ? `Retry Failed (${retryableTasks})` : 'Run Orchestrator'}
+            </button>
+          )}
           <button className="btn btn-glass" onClick={loadProject}>
             <RefreshCw size={18} />
             Refresh
@@ -670,6 +734,12 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
 
       {error && <div className="inline-status">{error}</div>}
       {message && <div className="inline-status"><CheckCircle2 size={16} color="var(--success)" />{message}</div>}
+      {isProjectCompleted && (
+        <div className="inline-status project-locked-notice">
+          <CheckCircle2 size={16} color="var(--success)" />
+          <span>This project is completed and locked. Reports remain available, but tasks, agents, approvals, retries, and assignments are read-only.</span>
+        </div>
+      )}
 
       {uiMode === 'guided' && (
         <section className="glass-panel project-form">
@@ -683,17 +753,17 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
                 <strong>1. Prepare agents</strong>
                 <p>{agents.length > 0 ? `${agents.length} agents available.` : 'Create the default agents for this workspace.'}</p>
               </div>
-              <button className="btn btn-glass btn-sm" type="button" onClick={createDefaultAgents}>
+              <button className="btn btn-glass btn-sm" type="button" onClick={createDefaultAgents} disabled={!canModifyProject}>
                 Generate Defaults
               </button>
             </div>
             <div className="task-row">
               <div>
                 <strong>2. Build the plan</strong>
-                <p>{tasks.length > 0 ? `${tasks.length} tasks in the current plan.` : 'Run the orchestrator to generate the task plan from the project context.'}</p>
+                <p>{retryableTasks > 0 ? `${retryableTasks} failed tasks can be retried.` : tasks.length > 0 ? `${tasks.length} tasks in the current plan.` : 'Run the orchestrator to generate the task plan from the project context.'}</p>
               </div>
-              <button className="btn btn-primary btn-sm" type="button" onClick={runOrchestrator} disabled={orchestrating}>
-                {orchestrating ? 'Starting...' : 'Generate Plan'}
+              <button className="btn btn-primary btn-sm" type="button" onClick={runOrchestrator} disabled={orchestrating || !canModifyProject}>
+                {orchestrating ? 'Starting...' : retryableTasks > 0 ? 'Retry Failed' : tasks.length > 0 ? 'Run Queued' : 'Generate Plan'}
               </button>
             </div>
             <div className="task-row">
@@ -701,7 +771,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
                 <strong>3. Review outputs</strong>
                 <p>{tasksAwaitingApproval > 0 ? `${tasksAwaitingApproval} tasks are waiting for approval.` : 'No tasks are waiting for approval right now.'}</p>
               </div>
-              {tasksAwaitingApproval > 0 && (
+              {canModifyProject && tasksAwaitingApproval > 0 && (
                 <button className="btn btn-glass btn-sm" type="button" onClick={handleApproveAll} disabled={approvingAll}>
                   {approvingAll ? 'Approving...' : 'Approve Pending'}
                 </button>
@@ -736,7 +806,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
                 Create Planner, Builder, and Reviewer agents for this workspace.
               </p>
             </div>
-            <button className="btn btn-glass" onClick={createDefaultAgents}>
+            <button className="btn btn-glass" onClick={createDefaultAgents} disabled={!canModifyProject}>
               <PlusCircle size={18} />
               Generate Defaults
             </button>
@@ -748,25 +818,30 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
               <PlusCircle size={22} color="var(--accent)" />
               <h3>{editingTaskId ? 'Edit Task' : uiMode === 'guided' ? 'Add Manual Task' : 'Add Task'}</h3>
             </div>
-            {editingTaskId && (
+            {editingTaskId && canModifyProject && (
               <button className="btn btn-icon" type="button" onClick={resetTaskForm} title="Cancel edit">
                 <X size={18} />
               </button>
             )}
           </div>
+          {!canModifyProject && (
+            <div className="read-only-note">
+              This project is complete. Adding more tasks would change the approved scope, so task planning is disabled.
+            </div>
+          )}
           <form onSubmit={createTask} style={{ display: 'grid', gap: 'var(--space-md)' }}>
             <label>
               <span>Task Title</span>
-              <input value={title} onChange={(event) => setTitle(event.target.value)} required placeholder="Draft implementation plan" />
+              <input value={title} onChange={(event) => setTitle(event.target.value)} required placeholder="Draft implementation plan" disabled={!canModifyProject} />
             </label>
             <label>
               <span>Description</span>
-              <textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={4} placeholder="Instructions for the assigned agent..." />
+              <textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={4} placeholder="Instructions for the assigned agent..." disabled={!canModifyProject} />
             </label>
             {(uiMode === 'expert' || showAdvancedTaskControls) && (
             <label>
               <span>Assigned Agent</span>
-              <select value={agentId} onChange={(event) => setAgentId(event.target.value)}>
+              <select value={agentId} onChange={(event) => setAgentId(event.target.value)} disabled={!canModifyProject}>
                 <option value="">Unassigned</option>
                 {agents.map((agent) => (
                   <option key={agent.id} value={agent.id}>{agent.name} ({agent.model})</option>
@@ -798,6 +873,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
                       <input
                         type="checkbox"
                         checked={dependencyIds.includes(task.id)}
+                        disabled={!canModifyProject}
                         onChange={(event) => {
                           setDependencyIds((current) =>
                             event.target.checked
@@ -815,7 +891,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
                 </div>
               </div>
             )}
-            <button className="btn btn-primary" type="submit" disabled={saving}>
+            <button className="btn btn-primary" type="submit" disabled={saving || !canModifyProject}>
               <CheckCircle2 size={18} />
               {saving ? (editingTaskId ? 'Saving...' : 'Adding...') : (editingTaskId ? 'Save Task' : 'Add Task')}
             </button>
@@ -828,7 +904,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
             <h3>Tasks</h3>
           </div>
           <div className="filter-bar" style={{ display: 'flex', gap: '8px', marginBottom: '16px', overflowX: 'auto', paddingBottom: '4px' }}>
-            {['all', 'todo', 'in_progress', 'awaiting_approval', 'done', 'failed'].map((f) => (
+            {['all', 'todo', 'queued', 'in_progress', 'awaiting_approval', 'done', 'failed'].map((f) => (
               <button 
                 key={f}
                 className={`btn ${filter === f ? 'btn-primary' : 'btn-glass'}`}
@@ -875,6 +951,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
                     {(uiMode === 'expert' || showAdvancedTaskControls) && (
                     <select
                       value={task.assigned_agent_id ?? ''}
+                      disabled={!canModifyProject}
                       onClick={(e) => e.stopPropagation()}
                       onChange={(e) => {
                         e.stopPropagation();
@@ -888,29 +965,33 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
                       ))}
                     </select>
                     )}
-                    <button
-                      className="btn btn-glass btn-sm"
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        startEditingTask(task);
-                      }}
-                    >
-                      <FilePenLine size={14} />
-                      Edit
-                    </button>
-                    <button
-                      className="btn btn-glass btn-sm"
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDeleteTask(task);
-                      }}
-                      style={{ color: 'var(--danger)', borderColor: 'rgba(231, 76, 60, 0.25)' }}
-                    >
-                      <Trash2 size={14} />
-                      Delete
-                    </button>
+                    {canModifyProject && (
+                      <>
+                        <button
+                          className="btn btn-glass btn-sm"
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            startEditingTask(task);
+                          }}
+                        >
+                          <FilePenLine size={14} />
+                          Edit
+                        </button>
+                        <button
+                          className="btn btn-glass btn-sm"
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteTask(task);
+                          }}
+                          style={{ color: 'var(--danger)', borderColor: 'rgba(231, 76, 60, 0.25)' }}
+                        >
+                          <Trash2 size={14} />
+                          Delete
+                        </button>
+                      </>
+                    )}
                   </div>
                   {(uiMode === 'expert' || showAdvancedTaskControls) && dependencyMap(task.id).length > 0 && (
                     <div style={{ marginTop: 'var(--space-sm)', display: 'grid', gap: '4px' }}>
@@ -954,7 +1035,20 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
             </div>
             {taskActionError && <div className="inline-status modal-error">{taskActionError}</div>}
             <div className="button-row modal-actions">
-              {selectedTask.status === 'awaiting_approval' ? (
+              {!canModifyProject ? (
+                <div style={{ flex: 1, textAlign: 'left', color: 'var(--text-dim)', fontSize: '0.9rem' }}>
+                  This project is completed and locked. Task output can be reviewed, but task status cannot be changed.
+                </div>
+              ) : hasTaskErrorOutput(selectedTask) ? (
+                <>
+                  <button className="btn btn-primary" onClick={() => retryTask(selectedTask)} disabled={taskActionPending || orchestrating}>
+                    {taskActionPending || orchestrating ? 'Retrying...' : 'Retry Task'}
+                  </button>
+                  <div style={{ flex: 1, textAlign: 'left', color: 'var(--danger)', fontSize: '0.9rem' }}>
+                    This task has a saved execution error and needs to be retried.
+                  </div>
+                </>
+              ) : selectedTask.status === 'awaiting_approval' ? (
                 <>
                   <button className="btn btn-primary" onClick={() => approveTask(selectedTask.id)} disabled={taskActionPending}>
                     {taskActionPending ? 'Saving...' : 'Approve Task'}
@@ -976,17 +1070,65 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
         </div>
       )}
 
+      {showRoadmap && (
+        <div className="modal-overlay" onClick={() => setShowRoadmap(false)}>
+          <div className="glass-panel modal-content task-review-modal roadmap-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-title-row">
+              <div>
+                <h3>Roadmap: {project?.name ?? 'Project'}</h3>
+                <p>{completedTasks}/{tasks.length} tasks complete. Phases are inferred from task status, priority, and dependencies.</p>
+              </div>
+              <button className="btn btn-glass btn-sm" onClick={() => setShowRoadmap(false)}>
+                Close
+              </button>
+            </div>
+
+            <div className="roadmap-timeline">
+              {roadmapPhases.map((phase, phaseIndex) => (
+                <section key={phase.phase} className="roadmap-phase">
+                  <div className="roadmap-phase-marker">
+                    <span>{phaseIndex + 1}</span>
+                  </div>
+                  <div className="roadmap-phase-content">
+                    <div className="roadmap-phase-header">
+                      <h4>{phase.phase}</h4>
+                      <span>{phase.tasks.length} task{phase.tasks.length === 1 ? '' : 's'}</span>
+                    </div>
+                    <div className="roadmap-task-list">
+                      {phase.tasks.map((task) => (
+                        <article key={task.id} className="roadmap-task">
+                          <div>
+                            <strong>{task.title}</strong>
+                            <p>{task.description || 'No description provided.'}</p>
+                            {(dependencyMap(task.id).length > 0 || dependentMap(task.id).length > 0) && (
+                              <small>
+                                {dependencyMap(task.id).length > 0 && `Depends on ${dependencyMap(task.id).length}`}
+                                {dependencyMap(task.id).length > 0 && dependentMap(task.id).length > 0 && ' · '}
+                                {dependentMap(task.id).length > 0 && `Blocks ${dependentMap(task.id).length}`}
+                              </small>
+                            )}
+                          </div>
+                          <div className="roadmap-task-meta">
+                            <span className={`status-badge status-${task.status}`}>
+                              {task.status.replace('_', ' ')}
+                            </span>
+                            <span>Priority {task.priority}</span>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  </div>
+                </section>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {finalReport && (
         <div className="modal-overlay" onClick={() => setFinalReport(null)}>
           <div className="glass-panel modal-content task-review-modal" onClick={(e) => e.stopPropagation()}>
             <h3>Final Report</h3>
-            {reportCharts && (
-              <div className="report-charts">
-                {renderScoreChart(reportCharts.scores)}
-                {renderBarChart('Task Categories', reportCharts.categories)}
-                {renderBarChart('Priorities', reportCharts.priorities)}
-              </div>
-            )}
             <div className="task-output-preview final-report-preview">
               <pre>{finalReport}</pre>
             </div>
