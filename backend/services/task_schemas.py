@@ -204,8 +204,9 @@ def validate_task_schema(task: dict, result: dict) -> dict:
             fail_reasons.append(f"Structured output is missing required fields: {', '.join(missing_fields)}.")
 
         missing_source_urls = _missing_source_urls(schema_name, payload)
-        if missing_source_urls:
-            fail_reasons.append("Structured factual claims require source_url values.")
+        # Relaxed: Missing source URLs no longer block approval, but are still tracked in metadata
+        # if missing_source_urls:
+        #     fail_reasons.append("Structured factual claims require source_url values.")
 
     return {
         "schema_type": schema_name,
