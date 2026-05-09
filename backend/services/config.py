@@ -62,10 +62,10 @@ class ConfigService:
         "openai":      {"enabled": True,  "default_model": "gpt-4o",                   "temperature": 0.7, "max_tokens": 4096},
         "openrouter":  {"enabled": True,  "default_model": "google/gemini-2.0-flash",  "temperature": 0.7, "max_tokens": 8192},
         "gemini":      {"enabled": True,  "default_model": "gemini-2.0-flash",         "temperature": 0.7, "max_tokens": 8192},
-        "amd":         {"enabled": True,  "default_model": "llama-3.3-70b-instruct",                   "temperature": 0.7, "max_tokens": 4096, "base_url": "https://inference.do-ai.run/v1"},
+        "amd":         {"enabled": True,  "default_model": "llama3.3-70b-instruct",                   "temperature": 0.7, "max_tokens": 4096, "base_url": "https://inference.do-ai.run/v1"},
         "ollama":      {"enabled": True,  "default_model": "llama3.1:8b",              "temperature": 0.7, "base_url": "http://localhost:11434"},
         "model_pricing": {
-            "amd:llama-3.3-70b-instruct": {"input_per_1k": 0.0006, "output_per_1k": 0.0018},
+            "amd:llama3.3-70b-instruct": {"input_per_1k": 0.0006, "output_per_1k": 0.0018},
             "groq:llama-3.3-70b-versatile": {"input_per_1k": 0.00059, "output_per_1k": 0.00079},
             "openai:gpt-4o": {"input_per_1k": 0.0025, "output_per_1k": 0.01},
             "openai:gpt-4o-mini": {"input_per_1k": 0.00015, "output_per_1k": 0.0006},

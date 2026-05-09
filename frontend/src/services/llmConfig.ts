@@ -39,7 +39,14 @@ export const providerOptions: Array<{
   {
     id: 'amd',
     label: 'AMD Inference',
-    models: ['llama-3.3-70b-instruct']
+    models: [
+      'llama3.3-70b-instruct',
+      'llama-4-maverick',
+      'deepseek-3.2',
+      'mistral-3-14B',
+      'gemma-4-31B-it',
+      'qwen3-coder-flash'
+    ]
   },
   {
     id: 'local',
