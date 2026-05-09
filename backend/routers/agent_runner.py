@@ -487,3 +487,52 @@ async def approve_all_tasks(project_id: str, background_tasks: BackgroundTasks):
         "count": len(result_data),
         "blocked": blocked
     }
+
+
+@router.delete("/logs")
+async def clear_agent_logs(project_id: str | None = None, task_id: str | None = None, access_token: str | None = None):
+    """
+    Deletes agent logs for a specific project or task.
+    """
+    user_id = _user_id_from_access_token(access_token)
+    
+    if task_id:
+        # Verify ownership/access of the task's project
+        task = supabase.table("tasks").select("project_id").eq("id", task_id).single().execute().data
+        if not task or not _can_view_project_for_user(task.get("project_id"), user_id):
+            raise HTTPException(status_code=403, detail="Not authorized to clear these logs")
+        
+        supabase.table("agent_logs").delete().eq("task_id", task_id).execute()
+    elif project_id:
+        if not _can_view_project_for_user(project_id, user_id):
+            raise HTTPException(status_code=403, detail="Not authorized to clear these logs")
+        
+        # Get all tasks for this project to delete logs associated with them
+        task_ids = _project_task_ids(project_id)
+        if task_ids:
+            supabase.table("agent_logs").delete().in_("task_id", task_ids).execute()
+    else:
+        # Clear all logs for all projects owned by the user
+        project_ids = (
+            supabase.table("projects")
+            .select("id")
+            .eq("owner_id", user_id)
+            .execute()
+            .data
+            or []
+        )
+        p_ids = [p["id"] for p in project_ids]
+        if p_ids:
+            all_task_ids = (
+                supabase.table("tasks")
+                .select("id")
+                .in_("project_id", p_ids)
+                .execute()
+                .data
+                or []
+            )
+            t_ids = [t["id"] for t in all_task_ids]
+            if t_ids:
+                supabase.table("agent_logs").delete().in_("task_id", t_ids).execute()
+
+    return {"message": "Logs cleared successfully"}

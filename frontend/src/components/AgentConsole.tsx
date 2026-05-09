@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { Terminal } from 'lucide-react';
+import { Terminal, Trash2 } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { getApiUrl } from '../services/runtimeConfig';
 
@@ -19,6 +19,7 @@ interface AgentConsoleProps {
 const AgentConsole: React.FC<AgentConsoleProps> = ({ projectId, taskId }) => {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [isClearing, setIsClearing] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -121,11 +122,53 @@ const AgentConsole: React.FC<AgentConsoleProps> = ({ projectId, taskId }) => {
     return date.toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
   };
 
+  const handleClear = async () => {
+    if (!window.confirm('Are you sure you want to delete all logs in this console?')) return;
+    
+    setIsClearing(true);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token;
+      const apiUrl = getApiUrl();
+
+      const params = new URLSearchParams();
+      if (accessToken) params.set('access_token', accessToken);
+      if (taskId) params.set('task_id', taskId);
+      else if (projectId) params.set('project_id', projectId);
+
+      const response = await fetch(`${apiUrl}/tasks/logs?${params.toString()}`, {
+        method: 'DELETE'
+      });
+
+      if (response.ok) {
+        setLogs([]);
+      } else {
+        const err = await response.text();
+        setError(`Failed to clear logs: ${err}`);
+      }
+    } catch (exc) {
+      setError(`Error clearing logs: ${exc instanceof Error ? exc.message : String(exc)}`);
+    } finally {
+      setIsClearing(false);
+    }
+  };
+
   return (
     <section className="glass-panel app-console">
-      <div style={{ padding: 'var(--space-sm) var(--space-md)', borderBottom: '1px solid var(--glass-border)', display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
-        <Terminal size={16} color="var(--accent)" />
-        <span style={{ fontSize: '0.8rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em' }}>Agent Console</span>
+      <div style={{ padding: 'var(--space-sm) var(--space-md)', borderBottom: '1px solid var(--glass-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
+          <Terminal size={16} color="var(--accent)" />
+          <span style={{ fontSize: '0.8rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em' }}>Agent Console</span>
+        </div>
+        <button 
+          className="btn btn-icon" 
+          onClick={handleClear} 
+          disabled={isClearing} 
+          title="Clear logs"
+          style={{ padding: '4px', opacity: 0.6 }}
+        >
+          <Trash2 size={14} color="var(--danger)" />
+        </button>
       </div>
       <div 
         ref={scrollRef}
