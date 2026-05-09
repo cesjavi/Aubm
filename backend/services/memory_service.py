@@ -27,8 +27,8 @@ class MemoryService:
                 return False
 
             embedding = await embedding_service.get_embedding(content)
-            if not embedding:
-                logger.warning(f"Skipping memory save for project {project_id}: No embedding generated (check OpenAI key).")
+            if not embedding or len(embedding) == 0:
+                logger.warning(f"Skipping memory save for project {project_id}: Embedding is empty or null.")
                 return False
             
             data = {
