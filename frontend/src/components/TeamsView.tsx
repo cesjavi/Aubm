@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { 
   Users, 
   Trash2, 
@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { useAuth } from '../context/useAuth';
+import ModalPortal from './common/ModalPortal';
 
 interface Team {
   id: string;
@@ -25,6 +26,10 @@ interface TeamMember {
   email?: string;
 }
 
+type TeamRole = TeamMember['role'];
+
+const getErrorMessage = (error: unknown) => error instanceof Error ? error.message : 'Unknown error';
+
 const TeamsView: React.FC = () => {
   const { user } = useAuth();
   const [teams, setTeams] = useState<Team[]>([]);
@@ -38,17 +43,7 @@ const TeamsView: React.FC = () => {
   const [inviteRole, setInviteRole] = useState<'admin' | 'editor' | 'viewer'>('viewer');
   const [actionPending, setActionPending] = useState(false);
 
-  useEffect(() => {
-    fetchTeams();
-  }, []);
-
-  useEffect(() => {
-    if (selectedTeam) {
-      fetchMembers(selectedTeam.id);
-    }
-  }, [selectedTeam]);
-
-  const fetchTeams = async () => {
+  const fetchTeams = useCallback(async () => {
     setLoading(true);
     try {
       // Fetch teams where user is a member
@@ -70,14 +65,14 @@ const TeamsView: React.FC = () => {
       if (formattedTeams.length > 0 && !selectedTeam) {
         setSelectedTeam(formattedTeams[0]);
       }
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(getErrorMessage(err));
     } finally {
       setLoading(false);
     }
-  };
+  }, [selectedTeam]);
 
-  const fetchMembers = async (teamId: string) => {
+  const fetchMembers = useCallback(async (teamId: string) => {
     try {
       const { data, error } = await supabase
         .from('team_members_with_profiles')
@@ -93,10 +88,20 @@ const TeamsView: React.FC = () => {
       }));
 
       setMembers(formattedMembers);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(getErrorMessage(err));
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    fetchTeams();
+  }, [fetchTeams]);
+
+  useEffect(() => {
+    if (selectedTeam) {
+      fetchMembers(selectedTeam.id);
+    }
+  }, [fetchMembers, selectedTeam]);
 
   const createTeam = async () => {
     if (!newTeamName.trim()) return;
@@ -113,8 +118,8 @@ const TeamsView: React.FC = () => {
       setNewTeamName('');
       setShowCreateModal(false);
       fetchTeams();
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(getErrorMessage(err));
     } finally {
       setActionPending(false);
     }
@@ -148,8 +153,8 @@ const TeamsView: React.FC = () => {
 
       setInviteEmail('');
       fetchMembers(selectedTeam.id);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(getErrorMessage(err));
     } finally {
       setActionPending(false);
     }
@@ -167,12 +172,12 @@ const TeamsView: React.FC = () => {
 
       if (error) throw error;
       fetchMembers(selectedTeam.id);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(getErrorMessage(err));
     }
   };
 
-  const updateMemberRole = async (memberId: string, newRole: string) => {
+  const updateMemberRole = async (memberId: string, newRole: TeamRole) => {
     try {
       const { error } = await supabase
         .from('team_members')
@@ -181,8 +186,8 @@ const TeamsView: React.FC = () => {
 
       if (error) throw error;
       if (selectedTeam) fetchMembers(selectedTeam.id);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(getErrorMessage(err));
     }
   };
 
@@ -294,7 +299,7 @@ const TeamsView: React.FC = () => {
                         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-md)' }}>
                           <select 
                             value={member.role}
-                            onChange={(e) => updateMemberRole(member.id, e.target.value)}
+                            onChange={(e) => updateMemberRole(member.id, e.target.value as TeamRole)}
                             disabled={selectedTeam.role !== 'admin' || member.user_id === user?.id}
                             className="glass-input"
                             style={{ padding: '4px 8px', fontSize: '0.8rem' }}
@@ -339,7 +344,7 @@ const TeamsView: React.FC = () => {
                       <select 
                         className="glass-input"
                         value={inviteRole}
-                        onChange={(e) => setInviteRole(e.target.value as any)}
+                        onChange={(e) => setInviteRole(e.target.value as TeamRole)}
                         style={{ width: '100%', marginBottom: 'var(--space-lg)' }}
                       >
                         <option value="admin">Admin (Manage members & projects)</option>
@@ -372,8 +377,9 @@ const TeamsView: React.FC = () => {
 
       {/* Create Team Modal */}
       {showCreateModal && (
-        <div className="modal-overlay" onClick={() => setShowCreateModal(false)}>
-          <div className="glass-panel modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '400px' }}>
+        <ModalPortal>
+          <div className="modal-overlay" onClick={() => setShowCreateModal(false)}>
+            <div className="glass-panel modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '400px' }}>
             <h3>Create New Team</h3>
             <p style={{ color: 'var(--text-dim)', fontSize: '0.9rem' }}>Teams allow you to share projects and collaborate with other users.</p>
             
@@ -399,8 +405,9 @@ const TeamsView: React.FC = () => {
                 </button>
               </div>
             </div>
+            </div>
           </div>
-        </div>
+        </ModalPortal>
       )}
     </div>
   );

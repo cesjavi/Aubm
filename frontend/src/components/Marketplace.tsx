@@ -18,6 +18,8 @@ interface AgentTemplate {
   teams?: { name: string };
 }
 
+const getErrorMessage = (error: unknown) => error instanceof Error ? error.message : 'Unknown error';
+
 const Marketplace: React.FC = () => {
   const [templates, setTemplates] = useState<AgentTemplate[]>([]);
   const [search, setSearch] = useState('');
@@ -89,8 +91,8 @@ const Marketplace: React.FC = () => {
 
       if (insertError) throw insertError;
       setMessage(`${template.name} has been added to your agent fleet.`);
-    } catch (e: any) {
-      setError(`Failed to deploy agent: ${e.message || 'Unknown error'}`);
+    } catch (e: unknown) {
+      setError(`Failed to deploy agent: ${getErrorMessage(e)}`);
     } finally {
       setDeployingId(null);
     }

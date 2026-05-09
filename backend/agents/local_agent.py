@@ -7,7 +7,7 @@ class LocalAgent(BaseAgent):
     """
     Agent implementation for Local LLMs (Ollama).
     """
-    def __init__(self, name: str, role: str, model: str = "llama3.1:8b", system_prompt: str = None):
+    def __init__(self, name: str, role: str, model: str = "qwen2.5", system_prompt: str = None):
         super().__init__(name, role, model, system_prompt)
         
         # Load dynamic config

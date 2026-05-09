@@ -1,7 +1,9 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { Terminal, Trash2 } from 'lucide-react';
+import { Terminal, Trash2, ChevronDown, ChevronUp } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { getApiUrl } from '../services/runtimeConfig';
+import GuideTooltip from './common/GuideTooltip';
+import { fetchBackend } from '../services/api';
 
 interface LogEntry {
   id: string;
@@ -14,9 +16,11 @@ interface LogEntry {
 interface AgentConsoleProps {
   projectId?: string | null;
   taskId?: string | null;
+  uiMode?: string;
 }
 
-const AgentConsole: React.FC<AgentConsoleProps> = ({ projectId, taskId }) => {
+const AgentConsole: React.FC<AgentConsoleProps> = ({ projectId, taskId, uiMode }) => {
+  const [isExpanded, setIsExpanded] = useState(false);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isClearing, setIsClearing] = useState(false);
@@ -112,10 +116,10 @@ const AgentConsole: React.FC<AgentConsoleProps> = ({ projectId, taskId }) => {
   }, [projectId, taskId]);
 
   useEffect(() => {
-    if (scrollRef.current) {
+    if (isExpanded && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [logs]);
+  }, [logs, isExpanded]);
 
   const formatTimestamp = (ts: string) => {
     const date = new Date(ts);
@@ -127,25 +131,15 @@ const AgentConsole: React.FC<AgentConsoleProps> = ({ projectId, taskId }) => {
     
     setIsClearing(true);
     try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const accessToken = sessionData.session?.access_token;
-      const apiUrl = getApiUrl();
-
       const params = new URLSearchParams();
-      if (accessToken) params.set('access_token', accessToken);
       if (taskId) params.set('task_id', taskId);
       else if (projectId) params.set('project_id', projectId);
 
-      const response = await fetch(`${apiUrl}/tasks/logs?${params.toString()}`, {
+      await fetchBackend(`/tasks/logs?${params.toString()}`, {
         method: 'DELETE'
       });
-
-      if (response.ok) {
-        setLogs([]);
-      } else {
-        const err = await response.text();
-        setError(`Failed to clear logs: ${err}`);
-      }
+      
+      setLogs([]);
     } catch (exc) {
       setError(`Error clearing logs: ${exc instanceof Error ? exc.message : String(exc)}`);
     } finally {
@@ -154,32 +148,63 @@ const AgentConsole: React.FC<AgentConsoleProps> = ({ projectId, taskId }) => {
   };
 
   return (
-    <section className="glass-panel app-console">
-      <div style={{ padding: 'var(--space-sm) var(--space-md)', borderBottom: '1px solid var(--glass-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+    <GuideTooltip 
+      active={uiMode === 'guided'} 
+      title="Agent Console" 
+      description="Watch in real-time what agents are thinking and doing. Click the chevron to expand."
+      position="top"
+    >
+      <section className={`glass-panel app-console ${isExpanded ? 'expanded' : 'collapsed'}`} style={{ 
+        position: 'fixed', 
+        bottom: 0, 
+        left: '260px', // Matches sidebar width
+        right: '20px',
+        zIndex: 100,
+        transition: 'height 0.3s ease',
+        height: isExpanded ? '300px' : '40px',
+        display: 'flex',
+        flexDirection: 'column',
+        borderRadius: 'var(--radius-lg) var(--radius-lg) 0 0',
+        background: 'rgba(13, 13, 20, 0.95)',
+        backdropFilter: 'blur(10px)',
+        border: '1px solid var(--glass-border)',
+        borderBottom: 'none'
+      }}>
+      <div 
+        style={{ padding: '0 var(--space-md)', height: '40px', borderBottom: isExpanded ? '1px solid var(--glass-border)' : 'none', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}
+        onClick={() => setIsExpanded(!isExpanded)}
+      >
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
-          <Terminal size={16} color="var(--accent)" />
-          <span style={{ fontSize: '0.8rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em' }}>Agent Console</span>
+          <Terminal size={16} color={logs.length > 0 ? "var(--accent)" : "var(--text-dim)"} />
+          <span style={{ fontSize: '0.75rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+            Agent Activity {logs.length > 0 && `(${logs.length})`}
+          </span>
         </div>
-        <button 
-          className="btn btn-icon" 
-          onClick={handleClear} 
-          disabled={isClearing} 
-          title="Clear logs"
-          style={{ padding: '4px', opacity: 0.6 }}
-        >
-          <Trash2 size={14} color="var(--danger)" />
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
+          {isExpanded && (
+            <button 
+              className="btn btn-icon" 
+              onClick={(e) => { e.stopPropagation(); handleClear(); }} 
+              disabled={isClearing} 
+              title="Clear logs"
+              style={{ padding: '4px', opacity: 0.6 }}
+            >
+              <Trash2 size={14} color="var(--danger)" />
+            </button>
+          )}
+          {isExpanded ? <ChevronDown size={18} /> : <ChevronUp size={18} />}
+        </div>
       </div>
       <div 
         ref={scrollRef}
         style={{ 
           padding: 'var(--space-md)', 
-          height: '150px', 
+          flex: 1,
           overflowY: 'auto', 
           fontFamily: 'monospace', 
           fontSize: '0.85rem', 
           color: 'var(--accent)',
-          display: 'flex',
+          display: isExpanded ? 'flex' : 'none',
           flexDirection: 'column',
           gap: '4px'
         }}
@@ -198,7 +223,8 @@ const AgentConsole: React.FC<AgentConsoleProps> = ({ projectId, taskId }) => {
           </div>
         ))}
       </div>
-    </section>
+      </section>
+    </GuideTooltip>
   );
 };
 

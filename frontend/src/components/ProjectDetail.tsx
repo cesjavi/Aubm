@@ -4,9 +4,12 @@ import { motion } from 'framer-motion';
 import { supabase } from '../services/supabase';
 import { useAuth } from '../context/useAuth';
 import { getDefaultModel, getDefaultProvider } from '../services/llmConfig';
-import { getApiUrl, getApiUrlCandidates } from '../services/runtimeConfig';
+import { getApiUrl } from '../services/runtimeConfig';
 import type { UiMode } from '../services/uiMode';
 import EvidenceView from './EvidenceView';
+import GuideTooltip from './common/GuideTooltip';
+import ModalPortal from './common/ModalPortal';
+import { fetchBackend, fetchBackendBlob } from '../services/api';
 
 interface Project {
   id: string;
@@ -80,33 +83,6 @@ const ensureBackendOk = async (response: Response, fallback?: string) => {
     const detail = fallback ?? (await getBackendErrorDetail(response));
     throw new Error(detail);
   }
-};
-
-const readBackendJson = async <T,>(response: Response): Promise<T> => {
-  const contentType = response.headers.get('content-type') || '';
-
-  if (!contentType.includes('application/json')) {
-    throw new Error(await getBackendErrorDetail(response));
-  }
-
-  return response.json() as Promise<T>;
-};
-
-const fetchBackendJson = async <T,>(path: string, init?: RequestInit): Promise<T> => {
-  let lastError: Error | null = null;
-
-  for (const apiUrl of getApiUrlCandidates()) {
-    try {
-      const response = await fetch(`${apiUrl}${path}`, init);
-      await ensureBackendOk(response);
-      return await readBackendJson<T>(response);
-    } catch (exc) {
-      lastError = exc instanceof Error ? exc : new Error('Backend request failed.');
-      if (!lastError.message.includes('frontend HTML page')) break;
-    }
-  }
-
-  throw lastError ?? new Error('Backend request failed.');
 };
 
 const hasTaskErrorOutput = (task: Task) =>
@@ -196,7 +172,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
 
   const loadBudget = useCallback(async () => {
     try {
-      const data = await fetchBackendJson<BudgetStatus>(`/orchestrator/projects/${projectId}/budget`);
+      const data = await fetchBackend<BudgetStatus>(`/orchestrator/projects/${projectId}/budget`);
       setBudgetStatus(data);
     } catch (exc) {
       console.warn('Failed to load budget status:', exc);
@@ -361,21 +337,21 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
     setError(null);
     setMessage(null);
 
-    const { error: deleteError } = await supabase.from('tasks').delete().eq('id', task.id);
-    if (deleteError) {
-      setError(deleteError.message);
-      return;
-    }
+    try {
+      await fetchBackend(`/tasks/${task.id}`, { method: 'DELETE' });
+      
+      if (editingTaskId === task.id) {
+        resetTaskForm();
+      }
+      if (selectedTask?.id === task.id) {
+        setSelectedTask(null);
+      }
 
-    if (editingTaskId === task.id) {
-      resetTaskForm();
+      await loadProject();
+      setMessage('Task deleted.');
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : 'Failed to delete task.');
     }
-    if (selectedTask?.id === task.id) {
-      setSelectedTask(null);
-    }
-
-    await loadProject();
-    setMessage('Task deleted.');
   };
 
   const assignTaskAgent = async (taskId: string, assignedAgentId: string) => {
@@ -523,19 +499,14 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
     setError(null);
     setMessage(null);
     try {
-      const response = await fetch(`${getApiUrl()}/tasks/project/${projectId}/approve-all`, {
-        method: 'POST'
-      });
-      if (response.ok) {
-        setMessage('All pending tasks approved!');
-        loadProject();
-      } else {
-        setError('Failed to approve all tasks.');
-      }
-    } catch {
-      setError('Error connecting to backend.');
+      await fetchBackend(`/tasks/project/${projectId}/approve-all`, { method: 'POST' });
+      setMessage('All pending tasks approved!');
+      await loadProject();
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : 'Failed to approve all tasks.');
+    } finally {
+      setApprovingAll(false);
     }
-    setApprovingAll(false);
   };
   const allTasksApproved = tasks.length > 0 && tasks.every((task) => task.status === 'done');
   const taskLookup = new Map(tasks.map((task) => [task.id, task]));
@@ -584,6 +555,56 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
       }))
       .filter((item) => item.tasks.length > 0);
   }, [dependencies, tasks]);
+
+  const regenerateProject = async () => {
+    if (!project) {
+      setError('Project is still loading. Try again in a moment.');
+      return;
+    }
+    if (!isOwner) {
+      setError('Only the project owner can regenerate this plan.');
+      return;
+    }
+    const confirmed = window.confirm('Regenerate this project from scratch? This will delete all current tasks, approvals, outputs, and task evidence, then generate a fresh plan from the project context.');
+    if (!confirmed) return;
+
+    setOrchestrating(true);
+    setError(null);
+    setMessage('Resetting project and regenerating a fresh plan...');
+
+    try {
+      const result = await fetchBackend<{ created_tasks?: number; message?: string }>(`/orchestrator/projects/${projectId}/regenerate`, { method: 'POST' });
+      setMessage(result.created_tasks ? `Project plan regenerated with ${result.created_tasks} new tasks.` : result.message || 'Project plan regenerated.');
+      await loadProject();
+    } catch (exc) {
+      console.error("Regeneration failed:", exc);
+      setError(exc instanceof Error ? exc.message : 'Failed to regenerate project.');
+      setMessage(null);
+    } finally {
+      setOrchestrating(false);
+    }
+  };
+
+  const clearProjectTasks = async () => {
+    if (!project || !isOwner) return;
+    const confirmed = window.confirm('Remove ALL tasks from this project? The project will be left blank with no tasks.');
+    if (!confirmed) return;
+
+    setOrchestrating(true);
+    setError(null);
+    setMessage('Clearing all tasks...');
+
+    try {
+      const result = await fetchBackend<{ removed_tasks?: number; message?: string }>(`/orchestrator/projects/${projectId}/clear-tasks`, { method: 'POST' });
+      setMessage(result.message || 'All tasks cleared.');
+      await loadProject();
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : 'Failed to clear tasks.');
+      setMessage(null);
+    } finally {
+      setOrchestrating(false);
+    }
+  };
 
   const humanizeKey = (key: string) => key.replace(/[_-]/g, ' ').trim().replace(/\b\w/g, (char) => char.toUpperCase());
 
@@ -641,13 +662,9 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
   };
 
   const updateTaskReviewStatus = async (taskId: string, action: 'approve' | 'reject') => {
-    const apiUrl = getApiUrl();
-
-    const response = await fetch(`${apiUrl}/tasks/${taskId}/${action}`, {
+    await fetchBackend(`/tasks/${taskId}/${action}`, {
       method: 'POST'
     });
-
-    await ensureBackendOk(response);
   };
 
   const approveTask = async (taskId: string) => {
@@ -697,10 +714,10 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
   const openFinalReport = async (variant: 'full' | 'brief' | 'pessimistic' | 'presentation' = 'full') => {
     setReportLoading(true);
     setError(null);
-    setMessage(null);
+    setMessage('Building final report. This can take a few seconds while approved outputs and evidence are consolidated.');
 
     try {
-      const body = await fetchBackendJson<{ report: string }>(
+      const body = await fetchBackend<{ report: string }>(
         `/orchestrator/projects/${projectId}/final-report?variant=${variant}`
       );
       const report = body.report?.trim();
@@ -710,6 +727,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
       setFinalReport(report);
       setFinalReportVariant(variant);
       await loadProject();
+      setMessage(null);
     } catch (exc) {
       setError(exc instanceof Error ? exc.message : 'Failed to build final report.');
     } finally {
@@ -722,14 +740,12 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
     setTaskActionPending(true);
     setTaskActionError(null);
     try {
-      const apiUrl = getApiUrl();
-      const response = await fetch(`${apiUrl}/tasks/${selectedTask.id}/output`, {
+      await fetchBackend(`/tasks/${selectedTask.id}/output`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ output_data: editedOutput })
       });
-      await ensureBackendOk(response);
-      
+
       const updatedTask = { ...selectedTask, output_data: editedOutput };
       setSelectedTask(updatedTask);
       setTasks(prev => prev.map(t => t.id === updatedTask.id ? updatedTask : t));
@@ -747,12 +763,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
     setError(null);
 
     try {
-      const apiUrl = getApiUrl();
-
-      const response = await fetch(`${apiUrl}/orchestrator/projects/${projectId}/final-report.pdf?variant=${finalReportVariant}`);
-      await ensureBackendOk(response);
-
-      const blob = await response.blob();
+      const blob = await fetchBackendBlob(`/orchestrator/projects/${projectId}/final-report.pdf?variant=${finalReportVariant}`);
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
@@ -784,72 +795,170 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
             )}
           </div>
         </div>
-        <div className="project-actions-container" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)', alignItems: 'flex-end' }}>
-          <div className="action-group" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-xs)', width: '100%', alignItems: 'flex-end' }}>
-            <button className="btn btn-glass btn-sm" onClick={loadProject} style={{ width: 'fit-content' }}>
-              <RefreshCw size={16} />
-              Refresh
-            </button>
-            {tasks.length > 0 && (
-              <button className="btn btn-glass btn-sm" onClick={() => setShowRoadmap(true)} style={{ width: 'fit-content' }}>
-                <MapIcon size={16} />
-                Roadmap
+        <div className="project-header-actions" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)', alignItems: 'flex-end', minWidth: '320px' }}>
+          {/* Navigation & Secondary Tools Group */}
+          <div style={{ display: 'flex', gap: 'var(--space-sm)', alignItems: 'center', width: '100%', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+            <GuideTooltip 
+              active={uiMode === 'guided'} 
+              title="Work Tabs" 
+              description="Switch between the task list and the technical evidence collected by agents."
+              position="bottom"
+            >
+              <div className="glass-panel" style={{ display: 'flex', padding: '3px', borderRadius: 'var(--radius-md)', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--glass-border)' }}>
+                <button 
+                  className={`btn btn-sm ${activeTab === 'tasks' ? 'btn-primary' : ''}`} 
+                  onClick={() => setActiveTab('tasks')}
+                  style={{ 
+                    borderRadius: 'var(--radius-sm)', 
+                    border: 'none', 
+                    background: activeTab === 'tasks' ? 'var(--accent)' : 'transparent', 
+                    color: activeTab === 'tasks' ? '#000' : 'var(--text-main)',
+                    fontWeight: 700,
+                    fontSize: '0.85rem', 
+                    padding: '8px 16px',
+                    transition: 'all 0.2s ease'
+                  }}
+                >
+                  <ListTodo size={16} />
+                  Tasks
+                </button>
+                <button 
+                  className={`btn btn-sm ${activeTab === 'evidence' ? 'btn-primary' : ''}`} 
+                  onClick={() => setActiveTab('evidence')}
+                  style={{ 
+                    borderRadius: 'var(--radius-sm)', 
+                    border: 'none', 
+                    background: activeTab === 'evidence' ? 'var(--accent)' : 'transparent', 
+                    color: activeTab === 'evidence' ? '#000' : 'var(--text-main)',
+                    fontWeight: 700,
+                    fontSize: '0.85rem', 
+                    padding: '8px 16px',
+                    transition: 'all 0.2s ease'
+                  }}
+                >
+                  <Database size={16} />
+                  Evidence
+                </button>
+              </div>
+            </GuideTooltip>
+
+            <div style={{ display: 'flex', gap: 'var(--space-xs)' }}>
+              <button className="btn btn-glass btn-sm" onClick={loadProject} title="Refresh project state">
+                <RefreshCw size={16} />
               </button>
-            )}
+              
+              {tasks.length > 0 && (
+                <GuideTooltip 
+                  active={uiMode === 'guided'} 
+                  title="Roadmap" 
+                  description="Visualize the execution plan and how tasks depend on each other."
+                  position="bottom"
+                >
+                  <button className="btn btn-glass btn-sm" onClick={() => setShowRoadmap(true)}>
+                    <MapIcon size={16} />
+                    Roadmap
+                  </button>
+                </GuideTooltip>
+              )}
+            </div>
           </div>
 
-          <div style={{ height: 'var(--space-md)' }} /> {/* Separator */}
-
-          <div className="action-group reports-group" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-xs)', width: '100%', alignItems: 'flex-end' }}>
-            {allTasksApproved && (
-              <>
+          {/* Primary Action Bar */}
+          <div className="primary-action-bar" style={{ display: 'flex', gap: 'var(--space-sm)', width: '100%', justifyContent: 'flex-end' }}>
+            {tasks.length > 0 && isOwner && (
+              <div style={{ display: 'flex', gap: '4px' }}>
                 <button 
-                  className="btn btn-primary btn-final-report" 
+                  className="btn btn-glass" 
+                  onClick={clearProjectTasks} 
+                  disabled={orchestrating}
+                  title="Remove all tasks (leave project blank)"
+                  style={{ flex: '0 0 auto', padding: '0.9rem 1.2rem', color: 'var(--danger)', borderColor: 'rgba(231, 76, 60, 0.3)' }}
+                >
+                  <Trash2 size={20} />
+                </button>
+                <button 
+                  className="btn btn-glass" 
+                  onClick={regenerateProject} 
+                  disabled={orchestrating}
+                  title="Delete all tasks and regenerate from scratch"
+                  style={{ flex: '0 0 auto', padding: '0.9rem 1.2rem' }}
+                >
+                  <RefreshCw size={20} className={orchestrating ? 'animate-spin' : ''} />
+                </button>
+              </div>
+            )}
+            {allTasksApproved && !orchestrating ? (
+              <GuideTooltip 
+                active={uiMode === 'guided'} 
+                title="Final Report" 
+                description="All tasks are completed. Click to generate the strategic closing report."
+                position="left"
+              >
+                <button 
+                  className="btn btn-primary" 
                   onClick={() => openFinalReport('full')} 
                   disabled={reportLoading}
                   style={{
                     background: 'linear-gradient(135deg, var(--accent) 0%, #7c3aed 100%)',
-                    boxShadow: '0 4px 15px rgba(124, 58, 237, 0.3)',
-                    fontWeight: 700,
-                    padding: '0.8rem 1.5rem',
-                    width: '100%',
-                    justifyContent: 'center'
+                    boxShadow: '0 8px 24px rgba(124, 58, 237, 0.4)',
+                    color: '#000',
+                    fontWeight: 900,
+                    fontSize: '1.1rem',
+                    padding: '1rem 2.5rem',
+                    flex: 1,
+                    justifyContent: 'center',
+                    border: 'none',
+                    letterSpacing: '0.02em'
                   }}
                 >
-                  <FileText size={18} />
-                  {reportLoading ? 'Building...' : 'Final Report'}
+                  <FileText size={22} />
+                  {reportLoading ? 'BUILDING...' : 'GENERATE STRATEGIC REPORT'}
                 </button>
-                <button className="btn btn-glass btn-sm" onClick={() => openFinalReport('brief')} disabled={reportLoading} style={{ width: '100%', justifyContent: 'center' }}>
-                  <FileText size={16} />
-                  Brief Summary
-                </button>
-                <button className="btn btn-glass btn-sm" onClick={() => openFinalReport('pessimistic')} disabled={reportLoading} style={{ width: '100%', justifyContent: 'center' }}>
-                  <FileText size={16} />
-                  Risks Analysis
-                </button>
-                <button className="btn btn-glass btn-sm" onClick={() => openFinalReport('presentation')} disabled={reportLoading} style={{ width: '100%', justifyContent: 'center', borderColor: 'var(--accent)', color: 'var(--accent)' }}>
-                  <PlayCircle size={16} />
-                  Presentation Slides
-                </button>
-              </>
-            )}
-            
+              </GuideTooltip>
+            ) : !isProjectCompleted && isOwner ? (
+              <div style={{ display: 'flex', gap: 'var(--space-sm)', flex: 1 }}>
+                <GuideTooltip 
+                  active={uiMode === 'guided'} 
+                  title="Orchestrator" 
+                  description="Have agents analyze the project and start executing tasks autonomously."
+                  position="left"
+                >
+                  <button 
+                    className="btn btn-primary glow-pulse" 
+                    onClick={runOrchestrator} 
+                    disabled={orchestrating}
+                    style={{ 
+                      background: 'var(--accent)', 
+                      color: '#000',
+                      fontWeight: 800,
+                      fontSize: '1rem',
+                      flex: 1, 
+                      justifyContent: 'center', 
+                      padding: '0.9rem 2.5rem',
+                      border: 'none',
+                      boxShadow: '0 4px 15px rgba(0, 255, 255, 0.3)'
+                    }}
+                  >
+                    <PlayCircle size={20} />
+                    {orchestrating ? 'ORCHESTRATING...' : tasks.length === 0 ? 'PLAN & EXECUTE' : 'RESUME ORCHESTRATION'}
+                  </button>
+                </GuideTooltip>
+              </div>
+            ) : null}
+
             {canModifyProject && tasks.some(t => t.status === 'awaiting_approval') && (
-              <button className="btn btn-glass" onClick={handleApproveAll} disabled={approvingAll} style={{ borderColor: 'var(--success)', color: 'var(--success)', width: '100%', justifyContent: 'center' }}>
+              <button 
+                className="btn btn-glass" 
+                onClick={handleApproveAll} 
+                disabled={approvingAll} 
+                style={{ borderColor: 'var(--success)', color: 'var(--success)', fontWeight: 700, flex: '0 0 auto', padding: '0.7rem 1.5rem' }}
+              >
                 <CheckCircle2 size={18} />
-                Approve All
-              </button>
-            )}
-            
-            {canModifyProject && (
-              <button className="btn btn-primary" onClick={runOrchestrator} disabled={orchestrating} style={{ width: '100%', justifyContent: 'center' }}>
-                <PlayCircle size={18} />
-                {orchestrating ? 'Starting...' : retryableTasks > 0 ? `Retry (${retryableTasks})` : 'Run'}
+                Bulk Approve
               </button>
             )}
           </div>
         </div>
-
       </div>
 
       {error && <div className="inline-status">{error}</div>}
@@ -882,9 +991,16 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
                 <strong>2. Build the plan</strong>
                 <p>{retryableTasks > 0 ? `${retryableTasks} failed tasks can be retried.` : tasks.length > 0 ? `${tasks.length} tasks in the current plan.` : 'Run the orchestrator to generate the task plan from the project context.'}</p>
               </div>
-              <button className="btn btn-primary btn-sm" type="button" onClick={runOrchestrator} disabled={orchestrating || !canModifyProject}>
-                {orchestrating ? 'Starting...' : retryableTasks > 0 ? 'Retry Failed' : tasks.length > 0 ? 'Run Queued' : 'Generate Plan'}
-              </button>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                {tasks.length > 0 && isOwner && (
+                  <button className="btn btn-glass btn-sm" type="button" onClick={regenerateProject} disabled={orchestrating} title="Delete all tasks and regenerate from scratch">
+                    Regenerate
+                  </button>
+                )}
+                <button className="btn btn-primary btn-sm" type="button" onClick={runOrchestrator} disabled={orchestrating || !canModifyProject}>
+                  {orchestrating ? 'Starting...' : retryableTasks > 0 ? 'Retry Failed' : tasks.length > 0 ? 'Run Queued' : 'Generate Plan'}
+                </button>
+              </div>
             </div>
             <div className="task-row">
               <div>
@@ -1089,8 +1205,8 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
                 }}
               >
                 <div style={{ flex: 1 }}>
-                  <strong>{task.title}</strong>
-                  <p>{task.description || 'No description provided.'}</p>
+                  <strong style={{ fontSize: '1.1rem', color: '#fff', display: 'block' }}>{task.title}</strong>
+                  <p style={{ fontSize: '0.95rem', color: 'rgba(255,255,255,0.75)', marginTop: '6px', lineHeight: '1.4' }}>{task.description || 'No description provided.'}</p>
                   {(uiMode === 'expert' || showAdvancedTaskControls) && (
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: 'var(--space-sm)' }}>
                     {dependencyMap(task.id).length > 0 && (
@@ -1195,8 +1311,9 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
       </div>
 
       {selectedTask && (
-        <div className="modal-overlay" onClick={() => setSelectedTask(null)}>
-          <div className="glass-panel modal-content task-review-modal" onClick={(e) => e.stopPropagation()}>
+        <ModalPortal>
+          <div className="modal-overlay" onClick={() => setSelectedTask(null)}>
+            <div className="glass-panel modal-content task-review-modal" onClick={(e) => e.stopPropagation()}>
             <h3>Review: {selectedTask.title}</h3>
             <div className="task-output-preview" style={{ position: 'relative' }}>
               {isEditingOutput ? (
@@ -1274,13 +1391,15 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
                 Close
               </button>
             </div>
+            </div>
           </div>
-        </div>
+        </ModalPortal>
       )}
 
       {showRoadmap && (
-        <div className="modal-overlay" onClick={() => setShowRoadmap(false)}>
-          <div className="glass-panel modal-content task-review-modal roadmap-modal" onClick={(e) => e.stopPropagation()}>
+        <ModalPortal>
+          <div className="modal-overlay" onClick={() => setShowRoadmap(false)}>
+            <div className="glass-panel modal-content task-review-modal roadmap-modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-title-row">
               <div>
                 <h3>Roadmap: {project?.name ?? 'Project'}</h3>
@@ -1329,13 +1448,15 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
                 </section>
               ))}
             </div>
+            </div>
           </div>
-        </div>
+        </ModalPortal>
       )}
 
       {finalReport && (
-        <div className="modal-overlay" onClick={() => setFinalReport(null)}>
-          <div className="glass-panel modal-content task-review-modal" onClick={(e) => e.stopPropagation()}>
+        <ModalPortal>
+          <div className="modal-overlay" onClick={() => setFinalReport(null)}>
+            <div className="glass-panel modal-content task-review-modal" onClick={(e) => e.stopPropagation()}>
             <h3>
               {finalReportVariant === 'brief'
                 ? 'Brief Summary'
@@ -1365,8 +1486,9 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
                 Close
               </button>
             </div>
+            </div>
           </div>
-        </div>
+        </ModalPortal>
       )}
     </motion.div>
   );

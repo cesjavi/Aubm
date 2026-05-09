@@ -11,6 +11,8 @@ if backend_path not in sys.path:
 # Mock environment variables before importing app
 os.environ["SUPABASE_URL"] = "https://mock.supabase.co"
 os.environ["SUPABASE_SERVICE_ROLE_KEY"] = "mock-key"
+os.environ["TASK_EXECUTION_MODE"] = "direct"
+os.environ["TASK_QUEUE_EMBEDDED_WORKER"] = "false"
 
 with patch("supabase.create_client") as mock_create:
     mock_client = MagicMock()

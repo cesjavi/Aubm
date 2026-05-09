@@ -1,10 +1,11 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Bot, CheckCircle2, PlusCircle, RefreshCw, X, ShoppingBag } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { supabase } from '../services/supabase';
 import { useAuth } from '../context/useAuth';
 import { getDefaultModel, getDefaultProvider, providerOptions } from '../services/llmConfig';
 import type { SupportedProvider } from '../services/llmConfig';
+import ModalPortal from './common/ModalPortal';
 
 interface Agent {
   id: string;
@@ -15,6 +16,8 @@ interface Agent {
   system_prompt: string | null;
   created_at: string;
 }
+
+const getErrorMessage = (error: unknown) => error instanceof Error ? error.message : 'Unknown error';
 
 const AgentsView: React.FC = () => {
   const { user } = useAuth();
@@ -41,7 +44,7 @@ const AgentsView: React.FC = () => {
   const providerModels = providerOptions.find((option) => option.id === provider)?.models ?? [];
   const isEditing = selectedAgentId !== null;
 
-  const loadAgents = async () => {
+  const loadAgents = useCallback(async () => {
     setLoading(true);
     setError(null);
 
@@ -53,21 +56,21 @@ const AgentsView: React.FC = () => {
     if (selectError) setError(selectError.message);
     setAgents((data ?? []) as Agent[]);
     setLoading(false);
-  };
+  }, []);
+
+  const fetchTeams = useCallback(async () => {
+    try {
+      const { data } = await supabase.from('teams').select('id, name');
+      setTeams(data || []);
+    } catch {
+      console.error('Failed to fetch teams');
+    }
+  }, []);
 
   useEffect(() => {
     loadAgents();
     fetchTeams();
-  }, []);
-
-  const fetchTeams = async () => {
-    try {
-      const { data } = await supabase.from('teams').select('id, name');
-      setTeams(data || []);
-    } catch (err) {
-      console.error('Failed to fetch teams');
-    }
-  };
+  }, [fetchTeams, loadAgents]);
 
   const handleProviderChange = (value: SupportedProvider) => {
     setProvider(value);
@@ -149,8 +152,8 @@ const AgentsView: React.FC = () => {
       if (error) throw error;
       setMessage('Agent shared to marketplace!');
       setShowShareModal(false);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(getErrorMessage(err));
     } finally {
       setSaving(false);
     }
@@ -276,8 +279,9 @@ const AgentsView: React.FC = () => {
 
       {/* Share Modal */}
       {showShareModal && sharingAgent && (
-        <div className="modal-overlay" onClick={() => setShowShareModal(false)}>
-          <div className="glass-panel modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '500px' }}>
+        <ModalPortal>
+          <div className="modal-overlay" onClick={() => setShowShareModal(false)}>
+            <div className="glass-panel modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '500px' }}>
             <div className="panel-heading">
               <ShoppingBag size={28} color="var(--accent)" />
               <div>
@@ -349,8 +353,9 @@ const AgentsView: React.FC = () => {
                 </button>
               </div>
             </div>
+            </div>
           </div>
-        </div>
+        </ModalPortal>
       )}
     </motion.div>
   );

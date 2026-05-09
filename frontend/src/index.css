@@ -43,15 +43,17 @@
 }
 
 .btn-glass {
-  background: var(--glass-bg);
+  background: rgba(255, 255, 255, 0.05);
   border: 1px solid var(--glass-border);
-  color: var(--text-main);
+  color: #fff;
   backdrop-filter: var(--blur);
+  font-weight: 600;
 }
 
 .btn-glass:hover {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.3);
+  color: #fff;
 }
 
 /* Animations */
@@ -133,9 +135,12 @@
 
 .page-heading h2,
 .marketplace-header h2 {
-  font-size: clamp(1.65rem, 4vw, 2.5rem);
+  font-size: clamp(1.8rem, 5vw, 2.8rem);
   margin-bottom: var(--space-xs);
   line-height: 1.1;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: #fff;
 }
 
 .dashboard-grid,
@@ -1581,10 +1586,10 @@ select option {
 /* Modal Styles */
 .modal-overlay {
   position: fixed;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
+  inset: 0;
+  width: auto;
+  height: auto;
+  min-height: 100dvh;
   background: rgba(10, 15, 30, 0.95);
   backdrop-filter: blur(12px);
   display: flex;
@@ -1592,11 +1597,13 @@ select option {
   justify-content: center;
   z-index: 9999;
   padding: var(--space-md);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .modal-content {
   width: min(95%, 900px);
-  max-height: 90vh;
+  max-height: calc(100dvh - (var(--space-md) * 2));
   background: var(--bg-deep);
   border: 1px solid var(--accent);
   border-radius: var(--radius-lg);
@@ -1887,3 +1894,38 @@ textarea {
   border-radius: var(--radius-md);
   margin-bottom: var(--space-lg);
 }
+
+/* Guide System */
+.guide-wrapper {
+  transition: all 0.3s ease;
+}
+
+.guide-highlight-active {
+  position: relative;
+  z-index: 90;
+  box-shadow: 0 0 0 2px var(--accent), 0 0 20px rgba(var(--accent-rgb), 0.3);
+  border-radius: var(--radius-md);
+}
+
+.guide-indicator {
+  transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.guide-indicator:hover {
+  transform: scale(1.2);
+}
+
+.guide-popover {
+  background: rgba(10, 15, 30, 0.95);
+  backdrop-filter: blur(12px);
+}
+
+.guide-popover::before {
+  content: '';
+  position: absolute;
+  width: 0;
+  height: 0;
+  border-style: solid;
+}
+
+/* Position-specific arrows could be added here if needed */

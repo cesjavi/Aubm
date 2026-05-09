@@ -6,8 +6,8 @@ INSERT INTO public.agents (name, role, api_provider, model, system_prompt)
 SELECT
     'Planner',
     'Project Planner',
-    'openai',
-    'gpt-4o',
+    'amd',
+    'qwen3-coder-flash',
     'You decompose goals into clear, ordered implementation tasks.'
 WHERE NOT EXISTS (
     SELECT 1 FROM public.agents WHERE user_id IS NULL AND name = 'Planner'
@@ -17,8 +17,8 @@ INSERT INTO public.agents (name, role, api_provider, model, system_prompt)
 SELECT
     'Builder',
     'Implementation Agent',
-    'openai',
-    'gpt-4o',
+    'amd',
+    'qwen3-coder-flash',
     'You implement practical, production-oriented solutions with concise output.'
 WHERE NOT EXISTS (
     SELECT 1 FROM public.agents WHERE user_id IS NULL AND name = 'Builder'
@@ -28,8 +28,8 @@ INSERT INTO public.agents (name, role, api_provider, model, system_prompt)
 SELECT
     'Reviewer',
     'Quality Reviewer',
-    'openai',
-    'gpt-4o',
+    'amd',
+    'qwen3-coder-flash',
     'You review outputs for correctness, security, completeness, and missing tests.'
 WHERE NOT EXISTS (
     SELECT 1 FROM public.agents WHERE user_id IS NULL AND name = 'Reviewer'

@@ -2,7 +2,7 @@ from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from typing import List, Optional
 import json
 import logging
-import groq
+import openai
 from services.supabase_service import supabase
 from services.config import settings, config_service
 from pydantic import BaseModel
@@ -71,19 +71,21 @@ async def generate_project(
     user_message = f"User Prompt: {prompt}\n\nReference Context:\n{full_context}"
     
     try:
-        # 3. Call Groq
-        provider_config = config_service.get_provider_config("groq")
-        api_key = provider_config.get("api_key") or settings.GROQ_API_KEY
+        # 3. Call AMD/Qwen
+        provider_config = config_service.get_provider_config("amd")
+        api_key = provider_config.get("api_key") or settings.AMD_API_KEY
         
         if not api_key:
-            logger.error("GROQ_API_KEY is missing in settings and config")
-            raise HTTPException(status_code=500, detail="GROQ_API_KEY not configured")
+            logger.error("AMD_API_KEY is missing in settings and config")
+            raise HTTPException(status_code=500, detail="AMD_API_KEY not configured")
 
-        client = groq.AsyncGroq(api_key=api_key)
+        client = openai.AsyncOpenAI(
+            api_key=api_key,
+            base_url=provider_config.get("base_url", "https://inference.do-ai.run/v1")
+        )
         
-        # Use llama-3.3-70b-versatile to match GroqAgent.py
-        model_name = provider_config.get("default_model") or "llama-3.3-70b-versatile"
-        logger.info("Calling Groq with model: %s (Key: %s...)", model_name, api_key[:8] if api_key else "None")
+        model_name = provider_config.get("default_model") or "qwen3-coder-flash"
+        logger.info("Calling AMD/Qwen with model: %s (Key: %s...)", model_name, api_key[:8] if api_key else "None")
 
         response = await client.chat.completions.create(
             model=model_name,
@@ -96,7 +98,7 @@ async def generate_project(
         )
         
         response_text = response.choices[0].message.content
-        logger.info("Groq raw response received (%d chars)", len(response_text) if response_text else 0)
+        logger.info("AMD/Qwen raw response received (%d chars)", len(response_text) if response_text else 0)
         data = _parse_json_output(response_text)
         return data
         

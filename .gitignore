@@ -11,3 +11,6 @@ __pycache__/
 frontend/ios
 frontend/android
 .DS_Store
+/backend/tests
+backend/tests/conftest.py
+/backend/scratch

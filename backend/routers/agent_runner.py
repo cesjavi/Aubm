@@ -17,7 +17,46 @@ router = APIRouter()
 logger = logging.getLogger("uvicorn")
 
 
-def _assert_task_quality(task: dict):
+@router.delete("/{task_id}")
+async def delete_task(task_id: str):
+    """
+    Deletes a single task safely, orphaning it if DB constraints prevent deletion.
+    """
+    # 1. Check if task exists and get its project_id
+    res = supabase.table("tasks").select("*").eq("id", task_id).single().execute()
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    task = res.data
+    
+    try:
+        # 2. Deep clean related tables for this specific task
+        for table in ["audit_logs", "agent_logs", "task_claims", "project_memory", "task_dependencies"]:
+            try:
+                supabase.table(table).delete().eq("task_id", task_id).execute()
+            except:
+                pass
+        
+        try:
+            supabase.table("task_dependencies").delete().eq("depends_on_task_id", task_id).execute()
+        except:
+            pass
+
+        # 3. Attempt to delete the task
+        supabase.table("tasks").delete().eq("id", task_id).execute()
+        return {"message": "Task deleted successfully."}
+    except Exception as exc:
+        # FALLBACK: If deletion fails, orphan the task
+        logger.warning("Could not delete task %s, orphaning instead: %s", task_id, exc)
+        try:
+            supabase.table("tasks").update({"project_id": None}).eq("id", task_id).execute()
+            return {"message": "Task orphaned due to constraints."}
+        except Exception as orphan_exc:
+            logger.error("Failed to even orphan task %s: %s", task_id, orphan_exc)
+            raise HTTPException(status_code=500, detail=f"Delete failed: {exc}")
+
+
+def _assert_task_quality(task: dict, strict: bool = True):
     output_data = task.get("output_data") or {}
     if not isinstance(output_data, dict):
         raise HTTPException(status_code=400, detail="Task output is missing or malformed.")
@@ -35,7 +74,10 @@ def _assert_task_quality(task: dict):
         current_review = validate_output(task, output_data)
         if not current_review.get("approved"):
             reasons = current_review.get("fail_reasons") or ["Task output failed quality validation."]
-            raise HTTPException(status_code=400, detail=f"Task output failed quality review: {'; '.join(reasons)}")
+            if strict:
+                raise HTTPException(status_code=400, detail=f"Task output failed quality review: {'; '.join(reasons)}")
+            else:
+                logger.warning(f"Task {task.get('id')} approved by user despite quality issues: {reasons}")
         
         # If it's now approved by current rules, we allow it to proceed
         return
@@ -380,7 +422,7 @@ async def approve_task(task_id: str, background_tasks: BackgroundTasks):
     if not task_res.data:
         raise HTTPException(status_code=404, detail="Task not found")
     _assert_task_project_is_mutable(task_res.data)
-    _assert_task_quality(task_res.data)
+    _assert_task_quality(task_res.data, strict=False)
     task = update_task_status(task_id, "done")
     
     # Index for Long-Term Memory

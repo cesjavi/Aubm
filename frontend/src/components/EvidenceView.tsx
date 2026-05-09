@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Database, Search, ExternalLink, ShieldCheck, Filter } from 'lucide-react';
-import { getApiUrlCandidates } from '../services/runtimeConfig';
+import { fetchBackend } from '../services/api';
 
 interface Claim {
   id: string;
@@ -30,22 +30,7 @@ interface EvidenceViewProps {
   projectId: string;
 }
 
-const getEvidenceError = async (response: Response) => {
-  const contentType = response.headers.get('content-type') || '';
-
-  if (contentType.includes('application/json')) {
-    const body = await response.json().catch(() => null);
-    return body?.detail || body?.message || `Evidence request failed with status ${response.status}`;
-  }
-
-  const body = await response.text().catch(() => '');
-  if (body.trimStart().toLowerCase().startsWith('<!doctype')) {
-    return 'Evidence API returned the frontend HTML page. Check that the API URL points to the backend /api route.';
-  }
-
-  return body || `Evidence request failed with status ${response.status}`;
-};
-
+// Helpers removed (using fetchBackend)
 const getSourceHostname = (sourceUrl: string) => {
   try {
     return new URL(sourceUrl).hostname;
@@ -54,48 +39,28 @@ const getSourceHostname = (sourceUrl: string) => {
   }
 };
 
-const fetchEvidenceData = async (projectId: string, mergeEnabled: boolean) => {
-  let lastError: Error | null = null;
-
-  for (const apiUrl of getApiUrlCandidates()) {
-    try {
-      const response = await fetch(`${apiUrl}/orchestrator/projects/${projectId}/evidence?merge=${mergeEnabled}`);
-      if (!response.ok) throw new Error(await getEvidenceError(response));
-      if (!response.headers.get('content-type')?.includes('application/json')) {
-        throw new Error(await getEvidenceError(response));
-      }
-      return await response.json();
-    } catch (err) {
-      lastError = err instanceof Error ? err : new Error('Failed to fetch evidence data.');
-      if (!lastError.message.includes('frontend HTML page')) break;
-    }
-  }
-
-  throw lastError ?? new Error('Failed to fetch evidence data.');
-};
-
 const EvidenceView: React.FC<EvidenceViewProps> = ({ projectId }) => {
   const [data, setData] = useState<EvidenceData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [mergeEnabled, setMergeEnabled] = useState(true);
 
-  const loadEvidence = async () => {
+  const loadEvidence = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const result = await fetchEvidenceData(projectId, mergeEnabled);
+      const result = await fetchBackend<EvidenceData>(`/orchestrator/projects/${projectId}/evidence?merge=${mergeEnabled}`);
       setData(result);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
       setLoading(false);
     }
-  };
+  }, [mergeEnabled, projectId]);
 
   useEffect(() => {
     loadEvidence();
-  }, [projectId, mergeEnabled]);
+  }, [loadEvidence]);
 
   if (loading && !data) {
     return (

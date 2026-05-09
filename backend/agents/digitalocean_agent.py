@@ -8,7 +8,7 @@ class DigitalOceanAgent(BaseAgent):
     Agent provider using DigitalOcean's Gradient Inference API.
     Supports both Serverless Inference and dedicated Agent Inference endpoints.
     """
-    def __init__(self, name: str, role: str, model: str = "llama-3.3-70b-instruct", system_prompt: str = None):
+    def __init__(self, name: str, role: str, model: str = "qwen3-coder-flash", system_prompt: str = None):
         super().__init__(name, role, model, system_prompt)
         
         # Load dynamic config

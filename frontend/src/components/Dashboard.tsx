@@ -6,6 +6,7 @@ import { supabase } from '../services/supabase';
 import { useAuth } from '../context/useAuth';
 import AubixIcon from './AubixIcon';
 import StatusBadge from './common/StatusBadge';
+import type { InitialProjectData } from './NewProject';
 
 interface Project {
   id: string;
@@ -23,12 +24,17 @@ interface Task {
   status: string;
 }
 
+import GuideTooltip from './common/GuideTooltip';
+
 interface DashboardProps {
-  onNewProject: (data?: any) => void;
+  uiMode: string;
+  onNewProject: (data?: InitialProjectData) => void;
   onOpenProject: (projectId: string) => void;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ onNewProject, onOpenProject }) => {
+const getErrorMessage = (error: unknown) => error instanceof Error ? error.message : 'Unknown error';
+
+const Dashboard: React.FC<DashboardProps> = ({ uiMode, onNewProject, onOpenProject }) => {
   const { user } = useAuth();
   const [projects, setProjects] = useState<Project[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -113,15 +119,15 @@ const Dashboard: React.FC<DashboardProps> = ({ onNewProject, onOpenProject }) =>
         body: formData
       });
 
-      const data = await response.json();
+      const data = await response.json() as InitialProjectData & { detail?: string };
       if (!response.ok) throw new Error(data.detail || 'AI Generation failed');
       
       onNewProject(data); // Open NewProject wizard with pre-filled data
       setAiPrompt('');
       setMagicFiles([]);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Magic Generate Error:', err);
-      setError(`AI Error: ${err.message}`);
+      setError(`AI Error: ${getErrorMessage(err)}`);
     } finally {
       setIsGenerating(false);
     }
@@ -186,7 +192,13 @@ const Dashboard: React.FC<DashboardProps> = ({ onNewProject, onOpenProject }) =>
     <>
       <div className="page-heading dashboard-heading" style={{ marginBottom: 'var(--space-md)' }}>
         <div>
-          <h2>Project Dashboard</h2>
+          <GuideTooltip 
+            active={uiMode === 'guided'} 
+            title="Project Dashboard" 
+            description="Manage and monitor all your autonomous projects from here."
+          >
+            <h2>Project Dashboard</h2>
+          </GuideTooltip>
           <p style={{ color: 'var(--text-dim)' }}>Monitor and manage your autonomous AI agent workflows.</p>
         </div>
         <div className="button-row">
@@ -194,24 +206,36 @@ const Dashboard: React.FC<DashboardProps> = ({ onNewProject, onOpenProject }) =>
             <RefreshCw size={18} className={loading ? 'spin' : ''} />
             {loading ? 'Refreshing...' : 'Refresh'}
           </button>
-          <button className="btn btn-primary" onClick={() => onNewProject()}>
-            <FolderOpen size={18} />
-            New Project
-          </button>
+          <GuideTooltip 
+            active={uiMode === 'guided'} 
+            title="Create Project" 
+            description="Start a new workflow by defining objectives and agents manually."
+          >
+            <button className="btn btn-primary" onClick={() => onNewProject()}>
+              <FolderOpen size={18} />
+              New Project
+            </button>
+          </GuideTooltip>
         </div>
       </div>
 
       {/* AI Magic Bar (Aubix) */}
-      <section className="glass-panel magic-box" style={{ 
-        marginBottom: 'var(--space-xl)', 
-        padding: '12px 20px', 
-        border: '1px solid var(--accent)',
-        boxShadow: '0 0 30px rgba(110, 89, 255, 0.15)',
-        display: 'flex',
-        alignItems: 'center',
-        gap: 'var(--space-lg)',
-        background: 'rgba(110, 89, 255, 0.05)'
-      }}>
+      <GuideTooltip 
+        active={uiMode === 'guided'} 
+        title="Aubix Magic Bar" 
+        description="Type an idea (e.g., 'Audit my code') and Aubix will automatically generate the project, tasks, and necessary agents."
+        position="bottom"
+      >
+        <section className="glass-panel magic-box" style={{ 
+          marginBottom: 'var(--space-xl)', 
+          padding: '12px 20px', 
+          border: '1px solid var(--accent)',
+          boxShadow: '0 0 30px rgba(110, 89, 255, 0.15)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 'var(--space-lg)',
+          background: 'rgba(110, 89, 255, 0.05)'
+        }}>
         <AubixIcon size={64} />
         <div style={{ flex: 1 }}>
           <div style={{ display: 'flex', gap: 'var(--space-sm)', position: 'relative' }}>
@@ -272,11 +296,18 @@ const Dashboard: React.FC<DashboardProps> = ({ onNewProject, onOpenProject }) =>
           )}
         </div>
       </section>
+      </GuideTooltip>
 
       {error && <div className="inline-status">{error}</div>}
 
       {projects.length > 0 && (
-        <div className="dashboard-controls glass-panel">
+        <GuideTooltip 
+          active={uiMode === 'guided'} 
+          title="Filters & Search" 
+          description="Quickly find specific projects by filtering by status or progress."
+          position="bottom"
+        >
+          <div className="dashboard-controls glass-panel">
           <div className="dashboard-search">
             <Search size={17} />
             <input
@@ -320,14 +351,15 @@ const Dashboard: React.FC<DashboardProps> = ({ onNewProject, onOpenProject }) =>
             )}
           </div>
         </div>
-      )}
+      </GuideTooltip>
+    )}
 
       {!loading && projects.length === 0 && (
         <div className="glass-panel empty-state">
           <FolderOpen size={32} color="var(--accent)" />
           <h3>No projects yet</h3>
           <p>Create a project to start assigning agents and tasks.</p>
-          <button className="btn btn-primary" onClick={onNewProject}>
+          <button className="btn btn-primary" onClick={() => onNewProject()}>
             Create Project
           </button>
         </div>

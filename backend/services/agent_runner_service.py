@@ -63,11 +63,8 @@ class AgentRunnerService:
                 metadata={"project_id": project_id, "run_id": run_id, "status": "running"},
             )
 
-            # Emergency Model Override for decommissioned Groq models
+            # Factory now handles model overrides and fallbacks
             model_to_use = agent_data["model"]
-            if "llama3-70b-8192" in model_to_use:
-                model_to_use = "llama-3.3-70b-versatile"
-                logger.warning(f"Overriding decommissioned model {agent_data['model']} with {model_to_use}")
 
             agent = AgentFactory.get_agent(
                 provider=agent_data["api_provider"],
@@ -211,21 +208,21 @@ class AgentRunnerService:
             try:
                 result = await agent.run(task_instructions, context, extra_context=extra_context)
             except Exception as run_exc:
-                # Runtime Fallback to Groq if AMD or OpenAI fails
-                if agent_data.get("api_provider") in ("amd", "openai") and settings.GROQ_API_KEY:
-                    logger.warning(f"Primary provider {agent_data.get('api_provider')} failed: {run_exc}. Falling back to Groq.")
+                # Runtime fallback to AMD/Qwen if OpenAI fails.
+                if agent_data.get("api_provider") == "openai" and settings.ENABLE_AMD and settings.AMD_API_KEY:
+                    logger.warning(f"Primary provider {agent_data.get('api_provider')} failed: {run_exc}. Falling back to AMD/Qwen.")
                     supabase.table("agent_logs").insert({
                         "task_id": task_id,
                         "run_id": run_id,
                         "action": "provider_fallback",
-                        "content": f"Primary provider failed ({run_exc}). Falling back to Groq/Llama-3.3-70b."
+                        "content": f"Primary provider failed ({run_exc}). Falling back to AMD/Qwen."
                     }).execute()
                     
                     fallback_agent = AgentFactory.get_agent(
-                        provider="groq",
+                        provider="amd",
                         name=agent_data["name"],
                         role=agent_data["role"],
-                        model="llama-3.3-70b-versatile",
+                        model="qwen3-coder-flash",
                         system_prompt=agent_data.get("system_prompt")
                     )
                     result = await fallback_agent.run(task_instructions, context, extra_context=extra_context)

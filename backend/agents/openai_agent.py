@@ -5,7 +5,7 @@ from services.config import settings, config_service
 from tools.registry import tool_registry
 
 class OpenAIAgent(BaseAgent):
-    def __init__(self, name: str, role: str, model: str = "gpt-4o", system_prompt: str = None):
+    def __init__(self, name: str, role: str, model: str = "qwen3-coder-flash", system_prompt: str = None):
         super().__init__(name, role, model, system_prompt)
         
         # Load dynamic config

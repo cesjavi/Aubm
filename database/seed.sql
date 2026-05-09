@@ -3,9 +3,9 @@
 -- 1. Default Agents
 INSERT INTO public.agents (name, role, api_provider, model, system_prompt)
 VALUES 
-('GPT-4o', 'General Intelligence', 'openai', 'gpt-4o', 'You are a highly capable AI assistant.'),
-('AMD-4o', 'Performance Specialist', 'amd', 'gpt-4o', 'You are a high-performance agent running on AMD infrastructure.'),
-('Llama-3-70B', 'Fast Logic', 'groq', 'llama3-70b-8192', 'You are a fast and efficient reasoning agent.');
+('Qwen on AMD', 'General Intelligence', 'amd', 'qwen3-coder-flash', 'You are a highly capable AI assistant running on AMD inference.'),
+('AMD Qwen Coder', 'Performance Specialist', 'amd', 'qwen3-coder-flash', 'You are a high-performance agent running Qwen on AMD infrastructure.'),
+('Qwen Fast Logic', 'Fast Logic', 'amd', 'qwen3-coder-flash', 'You are a fast and efficient reasoning agent running Qwen on AMD infrastructure.');
 
 -- 2. Default App Config
 INSERT INTO public.app_config (key, value)

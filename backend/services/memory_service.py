@@ -26,6 +26,10 @@ class MemoryService:
             if not content or len(content.strip()) < 10:
                 return False
 
+            if not embedding_service.is_available():
+                logger.debug("Skipping memory save for project %s: embeddings are not configured.", project_id)
+                return False
+
             embedding = await embedding_service.get_embedding(content)
             if not embedding or len(embedding) == 0:
                 logger.warning(f"Skipping memory save for project {project_id}: Embedding is empty or null.")

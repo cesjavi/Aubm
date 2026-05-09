@@ -19,6 +19,9 @@ class EmbeddingService:
             except Exception as e:
                 logger.error(f"Failed to initialize OpenAI client for embeddings: {e}")
 
+    def is_available(self) -> bool:
+        return bool(settings.OPENAI_API_KEY and self.client)
+
     async def get_embedding(self, text: str) -> List[float]:
         """
         Fetches a single embedding for a string.

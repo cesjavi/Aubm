@@ -32,7 +32,7 @@ CREATE POLICY "Users can create their own templates" ON public.agent_templates
 -- Seed some marketplace templates
 INSERT INTO public.agent_templates (name, role, description, model, api_provider, category, system_prompt)
 VALUES 
-('Growth Hacker', 'Marketing Expert', 'Optimizes funnels and generates viral content ideas.', 'gpt-4o', 'openai', 'Marketing', 'You are a Growth Hacker focused on low-cost, high-impact strategies.'),
-('Code Architect', 'Senior Developer', 'Designs robust software architectures and reviews code.', 'gpt-4o', 'openai', 'Development', 'You are a Code Architect. Focus on scalability, security, and clean code.'),
-('Legal Analyst', 'Legal Advisor', 'Analyzes contracts and identifies legal risks.', 'gpt-4o', 'openai', 'Legal', 'You are a Legal Analyst. Review documents with high precision and caution.')
+('Growth Hacker', 'Marketing Expert', 'Optimizes funnels and generates viral content ideas.', 'qwen3-coder-flash', 'amd', 'Marketing', 'You are a Growth Hacker focused on low-cost, high-impact strategies.'),
+('Code Architect', 'Senior Developer', 'Designs robust software architectures and reviews code.', 'qwen3-coder-flash', 'amd', 'Development', 'You are a Code Architect. Focus on scalability, security, and clean code.'),
+('Legal Analyst', 'Legal Advisor', 'Analyzes contracts and identifies legal risks.', 'qwen3-coder-flash', 'amd', 'Legal', 'You are a Legal Analyst. Review documents with high precision and caution.')
 ON CONFLICT DO NOTHING;

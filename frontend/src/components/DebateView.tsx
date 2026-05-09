@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../services/supabase';
 import { MessageSquare, Play, CheckCircle2, AlertCircle } from 'lucide-react';
 import { motion } from 'framer-motion';
-import { getApiUrl } from '../services/runtimeConfig';
+import { fetchBackend } from '../services/api';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -171,7 +171,7 @@ const DebateView: React.FC = () => {
     setStatus('Initializing debate flow...');
     
     try {
-      const response = await fetch(`${getApiUrl()}/orchestrator/debate`, {
+      await fetchBackend('/orchestrator/debate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -181,15 +181,10 @@ const DebateView: React.FC = () => {
         })
       });
 
-      if (response.ok) {
-        setStatus('Debate started! Monitor the agent console for progress.');
-        // We keep loading=true, the useEffect will poll until completion
-      } else {
-        setStatus('Failed to start debate.');
-        setLoading(false);
-      }
-    } catch {
-      setStatus('Error connecting to backend.');
+      setStatus('Debate started! Monitor the agent console for progress.');
+      // We keep loading=true, the useEffect will poll until completion
+    } catch (exc) {
+      setStatus(exc instanceof Error ? exc.message : 'Error connecting to backend.');
       setLoading(false);
     }
   };

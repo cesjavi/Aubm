@@ -33,12 +33,14 @@ import SplashScreen from './components/SplashScreen';
 import ModeSelection from './components/ModeSelection';
 import TeamsView from './components/TeamsView';
 import AuditView from './components/AuditView';
+import type { InitialProjectData } from './components/NewProject';
 import { useEffect } from 'react';
-import { getUiMode, saveUiMode } from './services/uiMode';
+import { getUiMode, hasSavedUiMode, saveUiMode } from './services/uiMode';
 import type { UiMode } from './services/uiMode';
 import { getAppVersion } from './services/runtimeConfig';
 
 type AppTab = 'dashboard' | 'project-detail' | 'agents' | 'marketplace' | 'debate' | 'voice' | 'spatial' | 'monitoring' | 'teams' | 'audit' | 'new-project' | 'settings';
+const MODE_SELECTION_SESSION_KEY = 'aubm.modeSelectionShown';
 
 const App: React.FC = () => {
   const { session, loading, signOut, profile, user } = useAuth();
@@ -47,7 +49,7 @@ const App: React.FC = () => {
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [initialTaskId, setInitialTaskId] = useState<string | null>(null);
   const [projectDetailReturnTab, setProjectDetailReturnTab] = useState<AppTab>('dashboard');
-  const [initialProjectData, setInitialProjectData] = useState<any>(null);
+  const [initialProjectData, setInitialProjectData] = useState<InitialProjectData | null>(null);
   const [uiMode, setUiMode] = useState<UiMode>(() => getUiMode());
   const [isSidebarOpen, setIsSidebarOpen] = useState(() => typeof window === 'undefined' || window.innerWidth >= 900);
   const [showSplash, setShowSplash] = useState(true);
@@ -56,13 +58,18 @@ const App: React.FC = () => {
   useEffect(() => {
     const timer = setTimeout(() => {
       setShowSplash(false);
-      // Only show mode selection if session exists and we haven't shown it this session
-      if (sessionStorage.getItem('aubm.modeChosen') !== 'true') {
-        setShowModeSelection(true);
-      }
     }, 2500);
     return () => clearTimeout(timer);
   }, []);
+
+  useEffect(() => {
+    if (loading || showSplash || !session) return;
+    const modeWasChosen = hasSavedUiMode();
+    const modeSelectionWasShown = sessionStorage.getItem(MODE_SELECTION_SESSION_KEY) === 'true';
+    if (modeWasChosen && modeSelectionWasShown) return;
+
+    setShowModeSelection(true);
+  }, [loading, session, showSplash]);
 
   useEffect(() => {
     if (uiMode === 'expert') return;
@@ -89,7 +96,13 @@ const App: React.FC = () => {
     setUiMode(mode);
     saveUiMode(mode);
     setShowModeSelection(false);
-    sessionStorage.setItem('aubm.modeChosen', 'true');
+    sessionStorage.setItem(MODE_SELECTION_SESSION_KEY, 'true');
+  };
+
+  const handleSignOut = async () => {
+    sessionStorage.removeItem(MODE_SELECTION_SESSION_KEY);
+    setShowModeSelection(false);
+    await signOut();
   };
 
   if (loading || showSplash) return <AnimatePresence><SplashScreen /></AnimatePresence>;
@@ -203,7 +216,7 @@ const App: React.FC = () => {
               <SidebarItem 
                 icon={<LogOut size={20} />} 
                 label="Sign Out" 
-                onClick={signOut} 
+                onClick={handleSignOut} 
               />
             </nav>
 
@@ -235,7 +248,7 @@ const App: React.FC = () => {
           <div style={{ display: 'flex', gap: 'var(--space-md)', alignItems: 'center' }}>
             <div className="glass-panel api-status" style={{ background: 'rgba(var(--accent-rgb), 0.1)', border: '1px solid var(--accent)' }}>
               <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--accent)', textTransform: 'uppercase' }}>
-                Engine: AMD / Llama-3.3-70B
+                Engine: AMD / Qwen
               </span>
             </div>
             <div className="glass-panel api-status mobile-hide">
@@ -244,9 +257,9 @@ const App: React.FC = () => {
             </div>
             <div 
               className="glass-panel api-status mobile-hide hover-glow" 
-              onClick={() => updateUiMode(uiMode === 'guided' ? 'expert' : 'guided')}
+              onClick={() => setShowModeSelection(true)}
               style={{ cursor: 'pointer', transition: 'all 0.2s ease' }}
-              title="Click to switch UI Mode"
+              title="Click to choose UI mode"
             >
               <span>{uiMode === 'guided' ? 'Guided Mode' : 'Expert Mode'}</span>
             </div>
@@ -256,7 +269,8 @@ const App: React.FC = () => {
         <section className="animate-fade-in app-content">
           {activeTab === 'dashboard' && (
             <Dashboard
-              onNewProject={(data?: any) => {
+              uiMode={uiMode}
+              onNewProject={(data?: InitialProjectData) => {
                 setInitialProjectData(data || null);
                 navigateTo('new-project');
               }}
@@ -289,12 +303,12 @@ const App: React.FC = () => {
           {activeTab === 'monitoring' && uiMode === 'expert' && <MonitoringView />}
           {activeTab === 'teams' && uiMode === 'expert' && <TeamsView />}
           {activeTab === 'audit' && uiMode === 'expert' && <AuditView />}
-          {activeTab === 'new-project' && <NewProject uiMode={uiMode} initialData={initialProjectData} onCreated={() => { setInitialProjectData(null); navigateTo('dashboard'); }} />}
+          {activeTab === 'new-project' && <NewProject uiMode={uiMode} initialData={initialProjectData ?? undefined} onCreated={() => { setInitialProjectData(null); navigateTo('dashboard'); }} />}
           {activeTab === 'settings' && <SettingsView uiMode={uiMode} onUiModeChange={updateUiMode} />}
         </section>
 
         {/* Real-time Agent Console */}
-        <AgentConsole />
+        <AgentConsole uiMode={uiMode} />
       </main>
     </div>
   );

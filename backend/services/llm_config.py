@@ -3,17 +3,15 @@ from services.config import settings
 def getDefaultProvider() -> str:
     if settings.ENABLE_AMD:
         return "amd"
-    if settings.GROQ_API_KEY:
-        return "groq"
     if settings.OPENAI_API_KEY:
         return "openai"
-    return "groq" # Fallback
+    return "amd"
 
 def getDefaultModel(provider: str) -> str:
     if provider == "amd":
-        return "llama3.3-70b-instruct"
+        return "qwen3-coder-flash"
     if provider == "groq":
-        return "llama-3.3-70b-versatile"
+        return "qwen/qwen3-32b"
     if provider == "openai":
-        return "gpt-4o"
-    return "llama-3.3-70b-versatile"
+        return "qwen3-coder-flash"
+    return "qwen3-coder-flash"

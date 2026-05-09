@@ -58,17 +58,16 @@ class ConfigService:
 
     # Defaults used when DB has no config entry for a provider
     _DEFAULTS: Dict[str, Any] = {
-        "groq":        {"enabled": True,  "default_model": "llama-3.3-70b-versatile", "temperature": 0.7, "max_tokens": 4096},
-        "openai":      {"enabled": True,  "default_model": "gpt-4o",                   "temperature": 0.7, "max_tokens": 4096},
+        "groq":        {"enabled": True,  "default_model": "qwen/qwen3-32b",           "temperature": 0.7, "max_tokens": 4096},
+        "openai":      {"enabled": True,  "default_model": "qwen3-coder-flash",        "temperature": 0.7, "max_tokens": 4096},
         "openrouter":  {"enabled": True,  "default_model": "google/gemini-2.0-flash",  "temperature": 0.7, "max_tokens": 8192},
         "gemini":      {"enabled": True,  "default_model": "gemini-2.0-flash",         "temperature": 0.7, "max_tokens": 8192},
-        "amd":         {"enabled": True,  "default_model": "llama3.3-70b-instruct",                   "temperature": 0.7, "max_tokens": 4096, "base_url": "https://inference.do-ai.run/v1"},
-        "ollama":      {"enabled": True,  "default_model": "llama3.1:8b",              "temperature": 0.7, "base_url": "http://localhost:11434"},
+        "amd":         {"enabled": True,  "default_model": "qwen3-coder-flash",                       "temperature": 0.7, "max_tokens": 4096, "base_url": "https://inference.do-ai.run/v1"},
+        "ollama":      {"enabled": True,  "default_model": "qwen2.5",                  "temperature": 0.7, "base_url": "http://localhost:11434"},
         "model_pricing": {
-            "amd:llama3.3-70b-instruct": {"input_per_1k": 0.0006, "output_per_1k": 0.0018},
-            "groq:llama-3.3-70b-versatile": {"input_per_1k": 0.00059, "output_per_1k": 0.00079},
-            "openai:gpt-4o": {"input_per_1k": 0.0025, "output_per_1k": 0.01},
-            "openai:gpt-4o-mini": {"input_per_1k": 0.00015, "output_per_1k": 0.0006},
+            "amd:qwen3-coder-flash": {"input_per_1k": 0.0006, "output_per_1k": 0.0018},
+            "groq:qwen/qwen3-32b": {"input_per_1k": 0.00059, "output_per_1k": 0.00079},
+            "openai:qwen3-coder-flash": {"input_per_1k": 0.0006, "output_per_1k": 0.0018},
             "gemini:gemini-2.0-flash": {"input_per_1k": 0.0001, "output_per_1k": 0.0004},
             "gemini:gemini-1.5-pro": {"input_per_1k": 0.00125, "output_per_1k": 0.00375}
         }

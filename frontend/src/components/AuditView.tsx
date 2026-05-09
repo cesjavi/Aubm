@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { 
   ShieldCheck, 
   Search, 
@@ -22,7 +22,10 @@ interface AuditLog {
   action: string;
   agent_id: string | null;
   task_id: string | null;
-  metadata: any;
+  metadata: Record<string, unknown> | null;
+  actor_email?: string | null;
+  agent_name?: string | null;
+  task_title?: string | null;
   profiles?: {
     full_name: string | null;
     email: string | null;
@@ -35,6 +38,8 @@ interface AuditLog {
   };
 }
 
+const getErrorMessage = (error: unknown) => error instanceof Error ? error.message : 'Unknown error';
+
 const AuditView: React.FC = () => {
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [loading, setLoading] = useState(true);
@@ -44,11 +49,7 @@ const AuditView: React.FC = () => {
   const [page, setPage] = useState(0);
   const pageSize = 50;
 
-  useEffect(() => {
-    fetchLogs();
-  }, [page]);
-
-  const fetchLogs = async () => {
+  const fetchLogs = useCallback(async () => {
     setLoading(true);
     try {
       const { data, error: fetchError } = await supabase
@@ -59,21 +60,25 @@ const AuditView: React.FC = () => {
 
       if (fetchError) throw fetchError;
       setLogs(data || []);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(getErrorMessage(err));
     } finally {
       setLoading(false);
     }
-  };
+  }, [page, pageSize]);
+
+  useEffect(() => {
+    fetchLogs();
+  }, [fetchLogs]);
 
   const exportCSV = () => {
     const headers = ['Timestamp', 'Action', 'User', 'Agent', 'Task', 'Metadata'];
     const rows = logs.map(log => [
       log.created_at,
       log.action,
-      (log as any).actor_email || 'System',
-      (log as any).agent_name || 'N/A',
-      (log as any).task_title || 'N/A',
+      log.actor_email || 'System',
+      log.agent_name || 'N/A',
+      log.task_title || 'N/A',
       JSON.stringify(log.metadata)
     ]);
     
@@ -88,8 +93,8 @@ const AuditView: React.FC = () => {
 
   const filteredLogs = logs.filter(log => 
     log.action.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    ((log as any).actor_email || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-    ((log as any).agent_name || '').toLowerCase().includes(searchTerm.toLowerCase())
+    (log.actor_email || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (log.agent_name || '').toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   const formatTimestamp = (ts: string) => {
@@ -186,7 +191,7 @@ const AuditView: React.FC = () => {
                     <td style={{ padding: 'var(--space-md)', fontSize: '0.9rem' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <User size={14} style={{ opacity: 0.5 }} />
-                        {(log as any).actor_email || <span style={{ color: 'var(--text-dim)', fontSize: '0.8rem' }}>System</span>}
+                        {log.actor_email || <span style={{ color: 'var(--text-dim)', fontSize: '0.8rem' }}>System</span>}
                       </div>
                     </td>
                     <td style={{ padding: 'var(--space-md)', fontSize: '0.9rem' }}>
@@ -194,13 +199,13 @@ const AuditView: React.FC = () => {
                         {log.agent_id && (
                           <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: 'var(--accent)', fontSize: '0.8rem' }}>
                             <Bot size={12} />
-                            {(log as any).agent_name}
+                            {log.agent_name}
                           </div>
                         )}
                         {log.task_id && (
                           <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: 'var(--text-dim)', fontSize: '0.8rem' }}>
                             <FileText size={12} />
-                            {(log as any).task_title}
+                            {log.task_title}
                           </div>
                         )}
                         {!log.agent_id && !log.task_id && <span style={{ color: 'var(--text-dim)', fontSize: '0.8rem' }}>-</span>}
@@ -236,7 +241,7 @@ const AuditView: React.FC = () => {
                                   View Task
                                 </button>
                               )}
-                              {log.metadata?.project_id && (
+                              {typeof log.metadata?.project_id === 'string' && (
                                 <button className="btn btn-glass btn-sm" style={{ width: '100%', justifyContent: 'flex-start' }}>
                                   <ExternalLink size={14} />
                                   View Project

@@ -30,6 +30,24 @@ type ProjectSource =
       extracted: boolean;
     };
 
+export interface GeneratedProjectSource {
+  kind?: ProjectSource['kind'];
+  label?: string;
+  url?: string;
+  content?: string;
+  fileName?: string;
+  mimeType?: string;
+  size?: number;
+  extracted?: boolean;
+}
+
+export interface InitialProjectData {
+  name?: string;
+  description?: string;
+  context?: string;
+  sources?: GeneratedProjectSource[];
+}
+
 const supportedTextMimeTypes = new Set([
   'text/plain',
   'text/markdown',
@@ -116,7 +134,46 @@ const expertAccessStep = {
   description: 'Decide whether this project is personal or belongs to a team workspace.'
 };
 
-const NewProject: React.FC<{ uiMode: UiMode; initialData?: any; onCreated?: () => void }> = ({ uiMode, initialData, onCreated }) => {
+const getErrorMessage = (error: unknown) => error instanceof Error ? error.message : 'Unknown error';
+
+const toProjectSource = (source: GeneratedProjectSource): ProjectSource | null => {
+  const label = source.label?.trim() || source.fileName?.trim() || 'Generated source';
+
+  if (source.kind === 'link' && source.url) {
+    return {
+      id: crypto.randomUUID(),
+      kind: 'link',
+      label,
+      url: source.url
+    };
+  }
+
+  if (source.kind === 'note' && source.content) {
+    return {
+      id: crypto.randomUUID(),
+      kind: 'note',
+      label,
+      content: source.content
+    };
+  }
+
+  if (source.kind === 'file' && source.fileName) {
+    return {
+      id: crypto.randomUUID(),
+      kind: 'file',
+      label,
+      fileName: source.fileName,
+      mimeType: source.mimeType ?? 'application/octet-stream',
+      size: source.size ?? 0,
+      content: source.content,
+      extracted: source.extracted ?? Boolean(source.content)
+    };
+  }
+
+  return null;
+};
+
+const NewProject: React.FC<{ uiMode: UiMode; initialData?: InitialProjectData; onCreated?: () => void }> = ({ uiMode, initialData, onCreated }) => {
   const { user } = useAuth();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [name, setName] = useState('');
@@ -137,12 +194,22 @@ const NewProject: React.FC<{ uiMode: UiMode; initialData?: any; onCreated?: () =
   const [aiPrompt, setAiPrompt] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [generationFiles, setGenerationFiles] = useState<File[]>([]);
+
+  const fetchTeams = React.useCallback(async () => {
+    try {
+      const { data, error } = await supabase.from('teams').select('id, name');
+      if (error) throw error;
+      setTeams(data || []);
+    } catch (err) {
+      console.error('Failed to fetch teams:', err);
+    }
+  }, []);
   
   React.useEffect(() => {
     if (uiMode === 'expert') {
       fetchTeams();
     }
-  }, [uiMode]);
+  }, [fetchTeams, uiMode]);
 
   // Hydrate from Magic Bar / external data
   React.useEffect(() => {
@@ -151,10 +218,9 @@ const NewProject: React.FC<{ uiMode: UiMode; initialData?: any; onCreated?: () =
       if (initialData.description) setDescription(initialData.description);
       if (initialData.context) setContext(initialData.context);
       if (initialData.sources && Array.isArray(initialData.sources)) {
-        const aiSources: ProjectSource[] = initialData.sources.map((s: any) => ({
-          id: crypto.randomUUID(),
-          ...s
-        }));
+        const aiSources = initialData.sources
+          .map(toProjectSource)
+          .filter((source): source is ProjectSource => source !== null);
         setSources(aiSources);
       }
       // If we have initial data, jump to step 0 of the wizard (Basics) 
@@ -182,39 +248,29 @@ const NewProject: React.FC<{ uiMode: UiMode; initialData?: any; onCreated?: () =
 
       if (!response.ok) throw new Error('AI generation failed');
       
-      const data = await response.json();
+      const data = await response.json() as InitialProjectData;
       
       setName(data.name || '');
       setDescription(data.description || '');
       setContext(data.context || '');
       
       if (data.sources && Array.isArray(data.sources)) {
-        const aiSources: ProjectSource[] = data.sources.map((s: any) => ({
-          id: crypto.randomUUID(),
-          ...s
-        }));
+        const aiSources = data.sources
+          .map(toProjectSource)
+          .filter((source): source is ProjectSource => source !== null);
         setSources(prev => [...prev, ...aiSources]);
       }
 
       setMessage('Success! AI has drafted your project. Review the fields in the next steps.');
       setWizardStep(1);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('AI Generation Error:', err);
-      setMessage(`AI Error: ${err.message}`);
+      setMessage(`AI Error: ${getErrorMessage(err)}`);
     } finally {
       setIsGenerating(false);
     }
   };
 
-  const fetchTeams = async () => {
-    try {
-      const { data, error } = await supabase.from('teams').select('id, name');
-      if (error) throw error;
-      setTeams(data || []);
-    } catch (err) {
-      console.error('Failed to fetch teams:', err);
-    }
-  };
   const isWizard = true;
   const projectWizardSteps = uiMode === 'expert'
     ? [wizardSteps[4], wizardSteps[0], wizardSteps[1], wizardSteps[2], expertAccessStep, wizardSteps[3]]

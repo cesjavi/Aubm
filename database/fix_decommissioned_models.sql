@@ -1,15 +1,16 @@
--- Migration to fix decommissioned Groq models
--- Replaces llama3-70b-8192 with llama-3.3-70b-versatile across all tables
+-- Migration to fix decommissioned legacy models
+-- Replaces decommissioned legacy models with AMD/Qwen across all tables
 
 -- 1. Update agents (this is where the model is stored)
 UPDATE public.agents 
-SET model = 'llama-3.3-70b-versatile' 
-WHERE model = 'llama3-70b-8192';
+SET api_provider = 'amd',
+    model = 'qwen3-coder-flash'
+WHERE model IN ('llama3-70b-8192', 'llama-3.3-70b-versatile', 'llama3.3-70b-instruct');
 
 -- 2. Update any app_config entries
 UPDATE public.app_config 
-SET value = jsonb_set(value, '{default_model}', '"llama-3.3-70b-versatile"')
-WHERE key = 'groq' AND value->>'default_model' = 'llama3-70b-8192';
+SET value = jsonb_set(value, '{default_model}', '"qwen3-coder-flash"')
+WHERE key = 'amd' AND value->>'default_model' IN ('llama3-70b-8192', 'llama-3.3-70b-versatile', 'llama3.3-70b-instruct');
 
 -- 3. Reset failed tasks that were stuck due to this error
 -- We don't filter by model here because tasks don't have a model column,

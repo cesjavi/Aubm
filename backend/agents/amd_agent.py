@@ -8,7 +8,7 @@ class AMDAgent(BaseAgent):
     Agent implementation for AMD Inference (inference.do-ai.run).
     Compatible with OpenAI's API format.
     """
-    def __init__(self, name: str, role: str, model: str = "gpt-4o", system_prompt: str = None):
+    def __init__(self, name: str, role: str, model: str = "qwen3-coder-flash", system_prompt: str = None):
         super().__init__(name, role, model, system_prompt)
         
         self.provider_config = config_service.get_provider_config("amd")

@@ -9,27 +9,13 @@ export const providerOptions: Array<{
     id: 'groq',
     label: 'Groq',
     models: [
-      'llama-3.3-70b-versatile', 
-      'llama-3.1-8b-instant', 
-      'openai/gpt-oss-120b',
-      'openai/gpt-oss-20b',
-      'openai/gpt-oss-safeguard-20b',
-      'meta-llama/llama-4-scout-17b-16e-instruct',
-      'qwen/qwen3-32b',
-      'groq/compound',
-      'groq/compound-mini',
-      'allam-2-7b',
-      'meta-llama/llama-prompt-guard-2-22m',
-      'meta-llama/llama-prompt-guard-2-86m',
-      'canopylabs/orpheus-arabic-saudi',
-      'canopylabs/orpheus-v1-english',
-      'mixtral-8x7b-32768'
+      'qwen/qwen3-32b'
     ]
   },
   {
     id: 'openai',
     label: 'OpenAI',
-    models: ['gpt-4o', 'gpt-4o-mini']
+    models: ['qwen3-coder-flash']
   },
   {
     id: 'gemini',
@@ -40,18 +26,13 @@ export const providerOptions: Array<{
     id: 'amd',
     label: 'AMD Inference',
     models: [
-      'llama3.3-70b-instruct',
-      'llama-4-maverick',
-      'deepseek-3.2',
-      'mistral-3-14B',
-      'gemma-4-31B-it',
       'qwen3-coder-flash'
     ]
   },
   {
     id: 'local',
     label: 'Local (Ollama)',
-    models: ['llama3.1:8b', 'mistral', 'qwen2.5']
+    models: ['qwen2.5']
   }
 ];
 
@@ -68,8 +49,12 @@ export const getDefaultProvider = (): SupportedProvider => {
 
 export const getDefaultModel = (provider: SupportedProvider): string => {
   const stored = localStorage.getItem(providerStorageKeys.model);
-  const providerModels = providerOptions.find((option) => option.id === provider)?.models ?? ['llama-3.3-70b-versatile'];
-  return stored && providerModels.includes(stored) ? stored : providerModels[0];
+  const providerModels = providerOptions.find((option) => option.id === provider)?.models ?? ['qwen3-coder-flash'];
+  if (stored && !providerModels.includes(stored)) {
+    localStorage.setItem(providerStorageKeys.model, providerModels[0]);
+    return providerModels[0];
+  }
+  return stored ?? providerModels[0];
 };
 
 export const saveProviderDefaults = (provider: SupportedProvider, model: string) => {

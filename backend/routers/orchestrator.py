@@ -231,3 +231,70 @@ async def download_project_final_report_pdf(project_id: str, variant: str = "ful
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'}
     )
+
+
+def _purge_project_tasks(project_id: str) -> int:
+    """Shared helper: deletes or orphans all tasks for a project. Returns count processed."""
+    project_tasks = supabase.table("tasks").select("id").eq("project_id", project_id).execute()
+    task_ids = [t["id"] for t in project_tasks.data]
+
+    if task_ids:
+        logger.info("Purging project %s: processing %d tasks", project_id, len(task_ids))
+        for tid in task_ids:
+            try:
+                for table in ["audit_logs", "agent_logs", "task_claims", "project_memory", "task_dependencies"]:
+                    try:
+                        supabase.table(table).delete().eq("task_id", tid).execute()
+                    except:
+                        pass
+                try:
+                    supabase.table("task_dependencies").delete().eq("depends_on_task_id", tid).execute()
+                except:
+                    pass
+                supabase.table("tasks").delete().eq("id", tid).execute()
+            except Exception as exc:
+                logger.warning("Could not delete task %s, orphaning instead: %s", tid, exc)
+                try:
+                    supabase.table("tasks").update({"project_id": None}).eq("id", tid).execute()
+                except:
+                    pass
+
+    # Final safety sweep
+    try:
+        supabase.table("tasks").delete().eq("project_id", project_id).execute()
+    except:
+        pass
+
+    return len(task_ids)
+
+
+@router.post("/projects/{project_id}/clear-tasks")
+async def clear_project_tasks(project_id: str):
+    """Removes all tasks from a project, leaving it blank. No AI decomposition."""
+    project_service.get_project_or_404(project_id)
+    supabase.table("projects").update({"status": "active"}).eq("id", project_id).execute()
+    count = _purge_project_tasks(project_id)
+    return {"message": f"Project cleared. {count} tasks removed.", "removed_tasks": count}
+
+
+@router.post("/projects/{project_id}/regenerate")
+async def regenerate_project(project_id: str):
+    """
+    Clears all existing tasks and triggers auto-decomposition to create a fresh plan.
+    Hardened version that handles Foreign Key violations by 'orphaning' tasks instead of failing.
+    """
+    project_service.get_project_or_404(project_id)
+    supabase.table("projects").update({"status": "active"}).eq("id", project_id).execute()
+    _purge_project_tasks(project_id)
+
+    # Trigger decomposition
+    try:
+        created_count = await orchestrator_service.decompose_project(project_id, raise_errors=True)
+    except Exception as exc:
+        logger.exception("Project regeneration failed for %s", project_id)
+        raise HTTPException(status_code=500, detail=f"Project regeneration failed: {exc}") from exc
+
+    if created_count <= 0:
+        raise HTTPException(status_code=500, detail="Project regeneration failed: planner did not create any tasks.")
+    
+    return {"message": "Project plan regenerated successfully.", "created_tasks": created_count}

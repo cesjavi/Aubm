@@ -456,16 +456,8 @@ class OrchestratorService:
                 "content": f"DEBATE ERROR: {str(e)}"
             }).execute()
 
-    async def run_project(self, project_id: str):
-        """
-        Runs queued tasks in a project sequentially. Unassigned tasks are assigned
-        to the first available project-owner or global agent.
-        """
-        project = supabase.table("projects").select("*").eq("id", project_id).single().execute().data
-        if not project:
-            raise ValueError(f"Project not found: {project_id}")
-
-        owner_id = project.get("owner_id")
+    async def _get_or_create_project_tasks(self, project_id: str) -> list[dict]:
+        """Fetches tasks for a project, triggering decomposition if none exist."""
         tasks = (
             supabase.table("tasks")
             .select("*")
@@ -478,26 +470,39 @@ class OrchestratorService:
             or []
         )
 
-        # Check if ANY tasks exist for this project (regardless of status) to avoid re-decomposing
-        all_tasks_res = supabase.table("tasks").select("id", count="exact").eq("project_id", project_id).limit(1).execute()
-        has_any_tasks = all_tasks_res.count > 0 if all_tasks_res.count is not None else len(all_tasks_res.data) > 0
+        if not tasks:
+            # Check if ANY tasks exist (to avoid re-decomposing completed projects)
+            all_tasks_res = supabase.table("tasks").select("id", count="exact").eq("project_id", project_id).limit(1).execute()
+            has_any_tasks = all_tasks_res.count > 0 if all_tasks_res.count is not None else len(all_tasks_res.data) > 0
+            
+            if not has_any_tasks:
+                logger.info(f"No tasks found for project {project_id}. Triggering auto-decomposition.")
+                await self.decompose_project(project_id)
+                # Re-fetch
+                return (
+                    supabase.table("tasks")
+                    .select("*")
+                    .eq("project_id", project_id)
+                    .in_("status", ["todo", "failed", "queued"])
+                    .order("priority", desc=True)
+                    .order("created_at", desc=False)
+                    .execute()
+                    .data
+                    or []
+                )
+        return tasks
 
-        # Automatic Decomposition: Only if no tasks exist AT ALL
-        if not has_any_tasks:
-            logger.info(f"No tasks found for project {project_id}. Triggering auto-decomposition.")
-            await self.decompose_project(project_id)
-            # Re-fetch tasks after decomposition
-            tasks = (
-                supabase.table("tasks")
-                .select("*")
-                .eq("project_id", project_id)
-                .in_("status", ["todo", "failed", "queued"])
-                .order("priority", desc=True)
-                .order("created_at", desc=False)
-                .execute()
-                .data
-                or []
-            )
+    async def run_project(self, project_id: str):
+        """
+        Runs queued tasks in a project sequentially. Unassigned tasks are assigned
+        to the first available project-owner or global agent.
+        """
+        project = supabase.table("projects").select("*").eq("id", project_id).single().execute().data
+        if not project:
+            raise ValueError(f"Project not found: {project_id}")
+
+        owner_id = project.get("owner_id")
+        tasks = await self._get_or_create_project_tasks(project_id)
 
         agents = supabase.table("agents").select("*").execute().data or []
         available_agents = [
@@ -550,35 +555,7 @@ class OrchestratorService:
             raise ValueError("Completed projects are locked and cannot be modified.")
 
         owner_id = project.get("owner_id")
-        tasks = (
-            supabase.table("tasks")
-            .select("*")
-            .eq("project_id", project_id)
-            .in_("status", ["todo", "failed", "queued"])
-            .order("priority", desc=True)
-            .order("created_at", desc=False)
-            .execute()
-            .data
-            or []
-        )
-
-        all_tasks_res = supabase.table("tasks").select("id", count="exact").eq("project_id", project_id).limit(1).execute()
-        has_any_tasks = all_tasks_res.count > 0 if all_tasks_res.count is not None else len(all_tasks_res.data) > 0
-
-        if not has_any_tasks:
-            logger.info(f"No tasks found for project {project_id}. Triggering auto-decomposition before queueing.")
-            await self.decompose_project(project_id)
-            tasks = (
-                supabase.table("tasks")
-                .select("*")
-                .eq("project_id", project_id)
-                .in_("status", ["todo", "failed", "queued"])
-                .order("priority", desc=True)
-                .order("created_at", desc=False)
-                .execute()
-                .data
-                or []
-            )
+        tasks = await self._get_or_create_project_tasks(project_id)
 
         agents = supabase.table("agents").select("*").execute().data or []
         assigned_ids = {t.get("assigned_agent_id") for t in tasks if t.get("assigned_agent_id")}
@@ -943,94 +920,92 @@ class OrchestratorService:
             "evidence": evidence_service.summarize_claims(merged_claims),
         }
 
-    async def decompose_project(self, project_id: str):
+    async def decompose_project(self, project_id: str, raise_errors: bool = False) -> int:
         """
-        Uses a Planner agent to decompose a project into discrete tasks.
+        Uses alibaba-qwen3-32b on AMD to decompose a project into 5-8 tasks.
+        Bypasses json_object mode to allow JSON array responses.
         """
+        import json as _json
+        import openai as _openai
+
         project = supabase.table("projects").select("*").eq("id", project_id).single().execute().data
         owner_id = project.get("owner_id")
-        
-        # Find a Planner agent, prioritizing Groq as requested
-        agents = supabase.table("agents").select("*").execute().data or []
-        
-        # 1. Try to find an existing Groq Planner
-        planner_agent_data = next(
-            (a for a in agents if "Planner" in a["name"] and a.get("api_provider") == "groq"),
-            None
+
+        api_key = settings.AMD_API_KEY
+        base_url = "https://inference.do-ai.run/v1"
+        model = "alibaba-qwen3-32b"
+
+        logger.info(f"Using AMD/{model} for project decomposition (direct API).")
+
+        client = _openai.AsyncOpenAI(api_key=api_key, base_url=base_url)
+
+        prompt = (
+            f"Decompose the following project into 5-8 specific implementation tasks.\n\n"
+            f"Project: {project['name']}\n"
+            f"Description: {project['description']}\n"
+            f"Context: {project.get('context', 'None')}\n\n"
+            "Return ONLY a JSON array. No markdown, no explanation, no thinking.\n"
+            'Example: [{"title": "Setup env", "description": "Install deps", "priority": 5}]'
         )
-        
-        # 2. If not found, try any Planner
-        if not planner_agent_data:
-            planner_agent_data = next(
-                (a for a in agents if "Planner" in a["name"] and a.get("user_id") in (None, owner_id)),
-                next((a for a in agents if a.get("user_id") in (None, owner_id)), None)
-            )
-
-        # 3. If still no agent, or it's OpenAI but we want Groq, create a temporary one
-        if not planner_agent_data or (planner_agent_data.get("api_provider") == "openai" and not settings.OPENAI_API_KEY):
-            logger.info("Using default Groq Planner for decomposition.")
-            planner = AgentFactory.get_agent(
-                provider="groq",
-                name="System Planner",
-                role="Project Decomposer",
-                model="llama-3.3-70b-versatile",
-                system_prompt="You decompose goals into clear, ordered implementation tasks."
-            )
-        else:
-            planner = AgentFactory.get_agent(
-                provider=planner_agent_data["api_provider"],
-                name=planner_agent_data["name"],
-                role=planner_agent_data["role"],
-                model=planner_agent_data["model"],
-                system_prompt=planner_agent_data.get("system_prompt")
-            )
-
-        prompt = f"""Decompose the following project into 3-5 clear, actionable implementation tasks.
-Project Name: {project['name']}
-Description: {project['description']}
-Context: {project.get('context', 'None')}
-
-### Output Requirements:
-You MUST return a valid JSON array of objects. Each object represents a task.
-Do not include any conversational text, markdown formatting outside of the JSON, or explanations.
-
-### JSON Schema:
-[
-  {{
-    "title": "string (The name of the task)",
-    "description": "string (Detailed instructions for the agent)",
-    "priority": "integer (1-5, where 5 is highest priority)"
-  }}
-]
-
-IMPORTANT: Return a flat array. Do not wrap it in a parent 'tasks' object.
-Do not use placeholder names or generic filler tasks. Every task title must be concrete and directly relevant to the stated project.
-"""
 
         try:
-            result = await planner.run(prompt, [])
-            tasks_data = result.get("data")
+            response = await client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": "You are a project planner. Return ONLY a JSON array of task objects. Each object has title, description, and priority fields. No other text."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.7,
+                max_tokens=4096
+            )
 
-            # Handle common LLM wrapping patterns
+            raw = response.choices[0].message.content or ""
+            logger.info("--- PLANNER RAW OUTPUT ---")
+            logger.info(raw[:2000])
+
+            # Strip <think> tags
+            cleaned = raw.strip()
+            if "<think>" in cleaned:
+                think_end = cleaned.find("</think>")
+                if think_end != -1:
+                    cleaned = cleaned[think_end + len("</think>"):].strip()
+
+            # Strip markdown fences
+            if cleaned.startswith("```"):
+                cleaned = cleaned.split("\n", 1)[-1] if "\n" in cleaned else cleaned[3:]
+                if "```" in cleaned:
+                    cleaned = cleaned.rsplit("```", 1)[0]
+                cleaned = cleaned.strip()
+            if cleaned.startswith("json"):
+                cleaned = cleaned[4:].strip()
+
+            tasks_data = _json.loads(cleaned)
+
             if isinstance(tasks_data, dict):
                 if "tasks" in tasks_data and isinstance(tasks_data["tasks"], list):
                     tasks_data = tasks_data["tasks"]
-                else:
+                elif tasks_data.get("title"):
                     tasks_data = [tasks_data]
-            
-            if not isinstance(tasks_data, list):
-                raise ValueError(f"Agent returned invalid format: {type(tasks_data)}. Expected list or dict.")
 
-            # Filter out invalid tasks
+            if not isinstance(tasks_data, list):
+                raise ValueError(f"Expected list, got {type(tasks_data)}")
+
             valid_tasks = [
-                t for t in tasks_data 
+                {
+                    "title": t["title"],
+                    "description": t.get("description", ""),
+                    "priority": min(t.get("priority", 3), 5),
+                    "status": "todo",
+                }
+                for t in tasks_data
                 if isinstance(t, dict) and t.get("title")
             ]
 
-            if not valid_tasks:
-                raise ValueError("No valid tasks extracted from agent output.")
+            logger.info(f"Extracted {len(valid_tasks)} valid tasks from planner.")
 
-            # Insert tasks
+            if not valid_tasks:
+                raise ValueError("No valid tasks extracted.")
+
             from .project_service import project_service
             await project_service.add_tasks_to_project(project_id, valid_tasks)
             await audit_service.log_action(
@@ -1039,8 +1014,12 @@ Do not use placeholder names or generic filler tasks. Every task title must be c
                 metadata={"project_id": project_id, "task_count": len(valid_tasks)},
             )
             logger.info(f"Auto-decomposed project {project_id} into {len(valid_tasks)} tasks.")
+            return len(valid_tasks)
         except Exception as e:
             logger.error(f"Project decomposition failed: {e}")
+            if raise_errors:
+                raise
+            return 0
 
     def _resolve_agent(self, task: dict, available_agents: list[dict]):
         assigned_agent_id = task.get("assigned_agent_id")

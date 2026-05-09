@@ -199,7 +199,7 @@ def validate_task_schema(task: dict, result: dict) -> dict:
     if not isinstance(payload, dict):
         fail_reasons.append(f"Task requires structured JSON matching schema '{schema_name}'.")
     else:
-        missing_fields = [field for field in required if field not in payload or payload.get(field) in (None, "", [], {})]
+        missing_fields = [field for field in required if field not in payload or payload.get(field) in (None, "")]
         if missing_fields:
             fail_reasons.append(f"Structured output is missing required fields: {', '.join(missing_fields)}.")
 

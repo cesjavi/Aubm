@@ -9,23 +9,16 @@ from tools.registry import tool_registry
 logger = logging.getLogger("uvicorn")
 
 GROQ_ROTATION_POOL = [
-    "llama-3.3-70b-versatile",
-    "openai/gpt-oss-120b",
-    "meta-llama/llama-4-scout-17b-16e-instruct",
     "qwen/qwen3-32b",
-    "openai/gpt-oss-20b",
-    "groq/compound",
-    "llama-3.1-8b-instant"
 ]
 
 class GroqAgent(BaseAgent):
     """
     Agent implementation for Groq with automatic model rotation for rate limits.
     """
-    def __init__(self, name: str, role: str, model: str = "llama-3.3-70b-versatile", system_prompt: str = None):
-        # Auto-migrate decommissioned models
-        if "llama-3.1-70b" in model or "llama3-70b-8192" in model:
-            model = "llama-3.3-70b-versatile"
+    def __init__(self, name: str, role: str, model: str = "qwen/qwen3-32b", system_prompt: str = None):
+        if "llama" in model or "gpt" in model:
+            model = "qwen/qwen3-32b"
             
         super().__init__(name, role, model, system_prompt)
         
