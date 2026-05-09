@@ -135,7 +135,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
   const [taskActionPending, setTaskActionPending] = useState(false);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [finalReport, setFinalReport] = useState<string | null>(null);
-  const [finalReportVariant, setFinalReportVariant] = useState<'full' | 'brief' | 'pessimistic'>('full');
+  const [finalReportVariant, setFinalReportVariant] = useState<'full' | 'brief' | 'pessimistic' | 'presentation'>('full');
   const [showRoadmap, setShowRoadmap] = useState(false);
   const [reportLoading, setReportLoading] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
@@ -694,7 +694,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
     }
   };
 
-  const openFinalReport = async (variant: 'full' | 'brief' | 'pessimistic' = 'full') => {
+  const openFinalReport = async (variant: 'full' | 'brief' | 'pessimistic' | 'presentation' = 'full') => {
     setReportLoading(true);
     setError(null);
     setMessage(null);
@@ -826,6 +826,10 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
                 <button className="btn btn-glass btn-sm" onClick={() => openFinalReport('pessimistic')} disabled={reportLoading} style={{ width: '100%', justifyContent: 'center' }}>
                   <FileText size={16} />
                   Risks Analysis
+                </button>
+                <button className="btn btn-glass btn-sm" onClick={() => openFinalReport('presentation')} disabled={reportLoading} style={{ width: '100%', justifyContent: 'center', borderColor: 'var(--accent)', color: 'var(--accent)' }}>
+                  <PlayCircle size={16} />
+                  Presentation Slides
                 </button>
               </>
             )}
@@ -1337,7 +1341,9 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
                 ? 'Brief Summary'
                 : finalReportVariant === 'pessimistic'
                   ? 'Risks Analysis'
-                  : 'Final Report'}
+                  : finalReportVariant === 'presentation'
+                    ? 'Presentation Slides'
+                    : 'Final Report'}
             </h3>
             <div className="task-output-preview final-report-preview">
               {finalReport.split('\n').map((line, idx) => {

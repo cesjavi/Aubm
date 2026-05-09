@@ -327,14 +327,16 @@ REPORT_VARIANTS = {
             "Keep it short and decision-oriented. Do not invent entities, metrics, or placeholders."
         )
     },
-    "pessimistic": {
-        "title": "Pessimistic Analysis",
-        "agent_terms": ["pessimistic", "risk", "critic", "reviewer"],
-        "fallback_heading": "Pessimistic Analysis",
+    "presentation": {
+        "title": "Presentation Slides",
+        "agent_terms": ["brief", "writer", "summary"],
+        "fallback_heading": "Presentation Outline",
         "prompt": (
-            "Create a skeptical, downside-focused analysis from the approved project work. "
-            "Use plain English, no JSON, no code blocks. Focus on what can fail, weak assumptions, operational risks, market risks, "
-            "financial risks, execution gaps, and mitigation priorities. Do not invent entities, metrics, or placeholders."
+            "Transform the approved project work into a high-impact presentation deck structure. "
+            "For each slide, provide a Title and 3-4 concise bullet points. "
+            "Use plain English, no JSON, no code blocks. "
+            "Include: 1. Title Slide, 2. Objective, 3. Market/Problem Context, 4. Strategic Findings, 5. Proposed Solution/Roadmap, 6. Key Risks, 7. Final Recommendation. "
+            "Focus on visual clarity and executive communication."
         )
     }
 }
