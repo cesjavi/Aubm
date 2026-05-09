@@ -27,6 +27,9 @@ class MemoryService:
                 return False
 
             embedding = await embedding_service.get_embedding(content)
+            if not embedding:
+                logger.warning(f"Skipping memory save for project {project_id}: No embedding generated (check OpenAI key).")
+                return False
             
             data = {
                 "project_id": project_id,
@@ -57,6 +60,9 @@ class MemoryService:
         """
         try:
             query_embedding = await embedding_service.get_embedding(query)
+            if not query_embedding:
+                logger.warning("Aborting memory search: No embedding generated for query.")
+                return []
             
             # Use the match_project_memory RPC function defined in add_vector_memory.sql
             rpc_params = {

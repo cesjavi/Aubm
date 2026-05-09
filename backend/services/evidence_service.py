@@ -249,10 +249,9 @@ class EvidenceService:
 
             supabase.table("task_claims").delete().eq("task_id", task_id).execute()
             if claims:
-                supabase.table("task_claims").upsert(
-                    claims,
-                    on_conflict="project_id,claim_hash",
-                ).execute()
+                # Use insert since we already deleted by task_id and deduped claims in extract_claims.
+                # This avoids 'there is no unique or exclusion constraint matching the ON CONFLICT specification' error.
+                supabase.table("task_claims").insert(claims).execute()
             return len(claims)
         except Exception as exc:
             logger.warning("Could not persist task claims for %s: %s", task_id, exc)
