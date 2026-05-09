@@ -1809,3 +1809,81 @@ textarea {
   resize: vertical !important;
   min-height: 80px !important;
 }
+/* Final Report Document Styles */
+.final-report-preview {
+  background: white !important;
+  color: #1a1a1a !important;
+  padding: 3rem !important;
+  border-radius: var(--radius-sm) !important;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif !important;
+  line-height: 1.6 !important;
+  max-width: 800px;
+  margin: 0 auto;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+  overflow-y: auto;
+  max-height: 70vh;
+}
+
+.final-report-preview pre {
+  white-space: pre-wrap !important;
+  font-family: inherit !important;
+  background: transparent !important;
+  color: inherit !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+.final-report-preview h1 { font-size: 2.2rem; font-weight: 800; margin-bottom: 1.5rem; color: #000; border-bottom: 2px solid #eee; padding-bottom: 0.5rem; }
+.final-report-preview h2 { font-size: 1.6rem; font-weight: 700; margin-top: 2rem; margin-bottom: 1rem; color: #333; }
+.final-report-preview h3 { font-size: 1.2rem; font-weight: 700; margin-top: 1.5rem; margin-bottom: 0.75rem; color: #444; }
+.final-report-preview p { margin-bottom: 1rem; }
+.final-report-preview ul { margin-bottom: 1.5rem; padding-left: 1.5rem; }
+.final-report-preview li { margin-bottom: 0.5rem; }
+
+/* Budget & Usage styles */
+.budget-status-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  padding: var(--space-md);
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--glass-border);
+  margin-bottom: var(--space-md);
+}
+
+.budget-metric {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.85rem;
+}
+
+.budget-metric-label {
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.budget-metric-value {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.budget-metric-value.cost {
+  color: var(--success);
+}
+
+.project-locked-notice {
+  background: rgba(var(--success-rgb), 0.1);
+  border-color: var(--success);
+  color: var(--success);
+  padding: var(--space-md);
+  display: flex;
+  gap: var(--space-sm);
+  align-items: center;
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-lg);
+}

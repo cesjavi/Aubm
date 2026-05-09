@@ -207,7 +207,31 @@ class AgentRunnerService:
                 estimated_tokens=prompt_tokens + max_completion_tokens,
                 estimated_cost=estimated_preflight_cost,
             )
-            result = await agent.run(task_instructions, context, extra_context=extra_context)
+            
+            try:
+                result = await agent.run(task_instructions, context, extra_context=extra_context)
+            except Exception as run_exc:
+                # Runtime Fallback to Groq if AMD or OpenAI fails
+                if agent_data.get("api_provider") in ("amd", "openai") and settings.GROQ_API_KEY:
+                    logger.warning(f"Primary provider {agent_data.get('api_provider')} failed: {run_exc}. Falling back to Groq.")
+                    supabase.table("agent_logs").insert({
+                        "task_id": task_id,
+                        "run_id": run_id,
+                        "action": "provider_fallback",
+                        "content": f"Primary provider failed ({run_exc}). Falling back to Groq/Llama-3.3-70b."
+                    }).execute()
+                    
+                    fallback_agent = AgentFactory.get_agent(
+                        provider="groq",
+                        name=agent_data["name"],
+                        role=agent_data["role"],
+                        model="llama-3.3-70b-versatile",
+                        system_prompt=agent_data.get("system_prompt")
+                    )
+                    result = await fallback_agent.run(task_instructions, context, extra_context=extra_context)
+                else:
+                    raise run_exc
+
             duration = time.time() - start_time
 
             if result.get("status") == "error":

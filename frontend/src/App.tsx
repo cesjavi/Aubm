@@ -218,12 +218,17 @@ const App: React.FC = () => {
             {isSidebarOpen ? <X size={20} /> : <Menu size={20} />}
           </button>
           
-          <div style={{ display: 'flex', gap: 'var(--space-md)' }}>
-            <div className="glass-panel api-status">
+          <div style={{ display: 'flex', gap: 'var(--space-md)', alignItems: 'center' }}>
+            <div className="glass-panel api-status" style={{ background: 'rgba(var(--accent-rgb), 0.1)', border: '1px solid var(--accent)' }}>
+              <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--accent)', textTransform: 'uppercase' }}>
+                Engine: AMD / Llama-3.3-70B
+              </span>
+            </div>
+            <div className="glass-panel api-status mobile-hide">
               <span style={{ color: 'var(--success)' }}>●</span>
               <span>API Online</span>
             </div>
-            <div className="glass-panel api-status">
+            <div className="glass-panel api-status mobile-hide">
               <span>{uiMode === 'guided' ? 'Guided Mode' : 'Expert Mode'}</span>
             </div>
           </div>

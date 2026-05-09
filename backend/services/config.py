@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     OUTPUT_LANGUAGE: str = "en"
     PORT: int = 8000
     SENTRY_DSN: Optional[str] = None
+    ENABLE_AMD: bool = True
     
     model_config = {
         "env_file": ".env",
@@ -63,6 +64,14 @@ class ConfigService:
         "gemini":      {"enabled": True,  "default_model": "gemini-2.0-flash",         "temperature": 0.7, "max_tokens": 8192},
         "amd":         {"enabled": True,  "default_model": "llama-3.3-70b-instruct",                   "temperature": 0.7, "max_tokens": 4096, "base_url": "https://inference.do-ai.run/v1"},
         "ollama":      {"enabled": True,  "default_model": "llama3.1:8b",              "temperature": 0.7, "base_url": "http://localhost:11434"},
+        "model_pricing": {
+            "amd:llama-3.3-70b-instruct": {"input_per_1k": 0.0006, "output_per_1k": 0.0018},
+            "groq:llama-3.3-70b-versatile": {"input_per_1k": 0.00059, "output_per_1k": 0.00079},
+            "openai:gpt-4o": {"input_per_1k": 0.0025, "output_per_1k": 0.01},
+            "openai:gpt-4o-mini": {"input_per_1k": 0.00015, "output_per_1k": 0.0006},
+            "gemini:gemini-2.0-flash": {"input_per_1k": 0.0001, "output_per_1k": 0.0004},
+            "gemini:gemini-1.5-pro": {"input_per_1k": 0.00125, "output_per_1k": 0.00375}
+        }
     }
 
     @classmethod

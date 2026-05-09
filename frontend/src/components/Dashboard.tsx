@@ -13,6 +13,8 @@ interface Project {
   description: string | null;
   status: string;
   created_at: string;
+  owner_id: string;
+  is_public: boolean;
 }
 
 interface Task {
@@ -47,8 +49,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onNewProject, onOpenProject }) =>
 
     const { data: projectData, error: projectError } = await supabase
       .from('projects')
-      .select('id,name,description,status,created_at')
-      .eq('owner_id', user.id)
+      .select('id,name,description,status,created_at,owner_id,is_public')
+      .or(`owner_id.eq.${user.id},is_public.eq.true`)
       .order('created_at', { ascending: false });
 
     if (projectError) {
@@ -354,6 +356,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onNewProject, onOpenProject }) =>
               tasksTotal={counts.total}
               onOpen={() => onOpenProject(project.id)}
               onDelete={() => handleDeleteProject(project.id, project.name)}
+              isOwner={user?.id === project.owner_id}
+              isPublic={project.is_public}
             />
           );
         })}
@@ -362,30 +366,45 @@ const Dashboard: React.FC<DashboardProps> = ({ onNewProject, onOpenProject }) =>
   );
 };
 
-const ProjectCard: React.FC<{ name: string; status: string; tasksDone: number; tasksTotal: number; onOpen: () => void; onDelete: () => void }> = ({
+const ProjectCard: React.FC<{ name: string; status: string; tasksDone: number; tasksTotal: number;  onOpen: () => void;
+  onDelete: () => void;
+  isOwner: boolean;
+  isPublic: boolean;
+}> = ({
   name,
   status,
   tasksDone,
   tasksTotal,
   onOpen,
-  onDelete
+  onDelete,
+  isOwner,
+  isPublic
 }) => {
   const progress = tasksTotal > 0 ? (tasksDone / tasksTotal) * 100 : 0;
 
   return (
     <motion.div whileHover={{ y: -5 }} className="glass-panel project-card">
       <div className="project-card-header">
-        <h3>{name}</h3>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+          <h3>{name}</h3>
+          {!isOwner && isPublic && (
+            <span style={{ fontSize: '0.65rem', color: 'var(--info)', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Public Community Project
+            </span>
+          )}
+        </div>
         <div className="project-card-actions">
           <StatusBadge status={status} />
-          <button 
-            className="btn btn-icon" 
-            onClick={(e) => { e.stopPropagation(); onDelete(); }}
-            style={{ color: 'var(--danger)', opacity: 0.6 }}
-            title="Delete Project"
-          >
-            <Trash2 size={16} />
-          </button>
+          {isOwner && (
+            <button 
+              className="btn btn-icon" 
+              onClick={(e) => { e.stopPropagation(); onDelete(); }}
+              style={{ color: 'var(--danger)', opacity: 0.6 }}
+              title="Delete Project"
+            >
+              <Trash2 size={16} />
+            </button>
+          )}
         </div>
       </div>
 

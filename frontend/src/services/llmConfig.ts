@@ -39,7 +39,7 @@ export const providerOptions: Array<{
   {
     id: 'amd',
     label: 'AMD Inference',
-    models: ['gpt-4o']
+    models: ['llama-3.3-70b-instruct']
   },
   {
     id: 'local',
@@ -56,7 +56,7 @@ export const providerStorageKeys = {
 export const getDefaultProvider = (): SupportedProvider => {
   const stored = localStorage.getItem(providerStorageKeys.provider);
   const validProviders: SupportedProvider[] = ['openai', 'amd', 'groq', 'gemini', 'local'];
-  return (stored && validProviders.includes(stored as SupportedProvider)) ? (stored as SupportedProvider) : 'groq';
+  return (stored && validProviders.includes(stored as SupportedProvider)) ? (stored as SupportedProvider) : 'amd';
 };
 
 export const getDefaultModel = (provider: SupportedProvider): string => {

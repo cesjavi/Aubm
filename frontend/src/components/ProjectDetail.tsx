@@ -14,6 +14,8 @@ interface Project {
   description: string | null;
   context: string | null;
   status: string;
+  owner_id: string;
+  is_public: boolean;
 }
 
 interface Agent {
@@ -43,6 +45,13 @@ interface ProjectDetailProps {
   uiMode: UiMode;
   initialTaskId?: string | null;
   onBack: () => void;
+}
+
+interface BudgetStatus {
+  usage: {
+    total_tokens: number;
+    estimated_cost: number;
+  };
 }
 
 const getBackendErrorDetail = async (response: Response) => {
@@ -133,6 +142,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
   const [activeTab, setActiveTab] = useState<'tasks' | 'evidence'>('tasks');
   const [isEditingOutput, setIsEditingOutput] = useState(false);
   const [editedOutput, setEditedOutput] = useState('');
+  const [budgetStatus, setBudgetStatus] = useState<BudgetStatus | null>(null);
   const defaultProvider = getDefaultProvider();
   const defaultModel = getDefaultModel(defaultProvider);
 
@@ -184,6 +194,15 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
     [dependencies]
   );
 
+  const loadBudget = useCallback(async () => {
+    try {
+      const data = await fetchBackendJson<BudgetStatus>(`/orchestrator/projects/${projectId}/budget`);
+      setBudgetStatus(data);
+    } catch (exc) {
+      console.warn('Failed to load budget status:', exc);
+    }
+  }, [projectId]);
+
   const loadProject = useCallback(async () => {
     setError(null);
     setMessage(null);
@@ -194,7 +213,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
       { data: agentData },
       dependencyResponse
     ] = await Promise.all([
-      supabase.from('projects').select('id,name,description,context,status').eq('id', projectId).single(),
+      supabase.from('projects').select('id,name,description,context,status,owner_id,is_public').eq('id', projectId).single(),
       supabase.from('tasks').select('id,title,description,status,priority,assigned_agent_id,output_data').eq('project_id', projectId).order('created_at', { ascending: false }),
       supabase.from('agents').select('id,name,role,model').order('created_at', { ascending: false }),
       supabase.from('task_dependencies').select('task_id,depends_on_task_id').eq('project_id', projectId)
@@ -220,7 +239,8 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
 
   useEffect(() => {
     loadProject();
-  }, [loadProject]);
+    loadBudget();
+  }, [loadProject, loadBudget]);
 
   const resetTaskForm = () => {
     setEditingTaskId(null);
@@ -452,7 +472,10 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
       const body = await response.json().catch(() => null);
       setMessage(body?.mode === 'queue' ? 'Project tasks queued for worker execution.' : 'Project execution started immediately.');
       // Refresh after a delay to show the new tasks
-      window.setTimeout(loadProject, 2000);
+      window.setTimeout(() => {
+        loadProject();
+        loadBudget();
+      }, 2000);
     } catch (exc) {
       setError(exc instanceof Error ? exc.message : 'Failed to start orchestrator.');
     } finally {
@@ -520,7 +543,8 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
   const completedTasks = tasks.filter((task) => task.status === 'done').length;
   const retryableTasks = tasks.filter((task) => task.status === 'failed' || hasTaskErrorOutput(task)).length;
   const isProjectCompleted = project?.status === 'completed';
-  const canModifyProject = !isProjectCompleted;
+  const isOwner = user && project && user.id === project.owner_id;
+  const canModifyProject = !isProjectCompleted && isOwner;
   const roadmapPhases = useMemo(() => {
     const orderedPhases = [
       'Foundation',
@@ -753,7 +777,12 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
             Back
           </button>
           <h2>{project?.name ?? 'Project'}</h2>
-          <p style={{ color: 'var(--text-dim)' }}>{project?.description || 'No description provided.'}</p>
+          <div style={{ display: 'flex', gap: 'var(--space-sm)', alignItems: 'center' }}>
+            <p style={{ color: 'var(--text-dim)', margin: 0 }}>{project?.description || 'No description provided.'}</p>
+            {project?.is_public && project?.owner_id !== user?.id && (
+              <span className="badge badge-info" style={{ fontSize: '0.7rem', padding: '2px 8px' }}>PUBLIC RESOURCE</span>
+            )}
+          </div>
         </div>
         <div className="project-actions-container" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)', alignItems: 'flex-end' }}>
           <div className="action-group" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-xs)', width: '100%', alignItems: 'flex-end' }}>
@@ -877,6 +906,23 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
           <button className="btn btn-glass" type="button" onClick={() => setShowAdvancedTaskControls((current) => !current)}>
             {showAdvancedTaskControls ? 'Hide Advanced Controls' : 'Show Advanced Controls'}
           </button>
+
+          {budgetStatus && (
+            <div className="budget-status-panel" style={{ marginTop: 'var(--space-md)' }}>
+              <div className="settings-section-title" style={{ marginBottom: 'var(--space-xs)' }}>
+                <Database size={16} color="var(--accent)" />
+                <h4 style={{ fontSize: '0.85rem', margin: 0 }}>API Consumption</h4>
+              </div>
+              <div className="budget-metric">
+                <span className="budget-metric-label">Total Tokens</span>
+                <span className="budget-metric-value">{budgetStatus.usage.total_tokens.toLocaleString()}</span>
+              </div>
+              <div className="budget-metric">
+                <span className="budget-metric-label">Estimated Cost</span>
+                <span className="budget-metric-value cost">${budgetStatus.usage.estimated_cost.toFixed(4)}</span>
+              </div>
+            </div>
+          )}
         </section>
       )}
 
@@ -1294,7 +1340,15 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
                   : 'Final Report'}
             </h3>
             <div className="task-output-preview final-report-preview">
-              <pre>{finalReport}</pre>
+              {finalReport.split('\n').map((line, idx) => {
+                const trimmed = line.trim();
+                if (trimmed.startsWith('# ')) return <h1 key={idx}>{trimmed.replace('# ', '')}</h1>;
+                if (trimmed.startsWith('## ')) return <h2 key={idx}>{trimmed.replace('## ', '')}</h2>;
+                if (trimmed.startsWith('### ')) return <h3 key={idx}>{trimmed.replace('### ', '')}</h3>;
+                if (trimmed.startsWith('- ')) return <li key={idx} style={{ marginLeft: '1.5rem', listStyle: 'disc' }}>{trimmed.replace('- ', '')}</li>;
+                if (!trimmed) return <br key={idx} />;
+                return <p key={idx}>{line}</p>;
+              })}
             </div>
             <div className="button-row modal-actions">
               <button className="btn btn-primary" onClick={downloadFinalReportPdf} disabled={pdfLoading}>

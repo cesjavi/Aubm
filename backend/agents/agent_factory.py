@@ -27,15 +27,30 @@ class AgentFactory:
         Includes a fallback to Groq if OpenAI is requested but no key is provided.
         """
         provider = provider.lower()
-        
+
+        # Model Mapping: Ensure cross-provider compatibility
+        if provider == "amd":
+            if "gpt-4" in model or "gpt-3.5" in model:
+                model = "llama-3.3-70b-instruct"
+        elif provider == "groq":
+            if "gpt-4" in model or "gpt-3.5" in model:
+                model = "llama-3.3-70b-versatile"
         # Fallback Logic: OpenAI -> AMD -> Groq
         if provider == "openai" and not settings.OPENAI_API_KEY:
-            if settings.AMD_API_KEY:
+            if settings.ENABLE_AMD and settings.AMD_API_KEY:
                 provider = "amd"
                 model = "llama-3.3-70b-instruct"
             elif settings.GROQ_API_KEY:
                 provider = "groq"
                 model = "llama-3.3-70b-versatile"
+
+        # Explicit AMD Disable Switch
+        if provider == "amd" and not settings.ENABLE_AMD:
+            if settings.GROQ_API_KEY:
+                provider = "groq"
+                model = "llama-3.3-70b-versatile"
+            else:
+                raise ValueError("AMD is disabled and no Groq fallback available.")
 
         agent_class = PROVIDER_MAP.get(provider)
         
