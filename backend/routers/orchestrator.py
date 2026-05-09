@@ -1,8 +1,14 @@
+import asyncio
+import logging
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from fastapi.responses import Response
 from services.orchestrator_service import orchestrator_service
 from services.supabase_service import supabase
 from services.config import settings
+from services.budget_service import budget_service
+from services.evidence_service import evidence_service
+from services.project_service import project_service
+from services.utils import log_async_task_result
 from pydantic import BaseModel
 from io import BytesIO
 from reportlab.lib.pagesizes import letter
@@ -14,14 +20,10 @@ from xml.sax.saxutils import escape
 import re
 
 router = APIRouter()
+logger = logging.getLogger("uvicorn")
 
-def _ensure_project_is_mutable(project_id: str):
-    project = supabase.table("projects").select("id,status").eq("id", project_id).single().execute().data
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-    if project.get("status") == "completed":
-        raise HTTPException(status_code=409, detail="Completed projects are locked and cannot be modified.")
-    return project
+
+
 
 def _safe_filename(value: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_-]+", "_", value).strip("_").lower() or "report"
@@ -117,6 +119,13 @@ class DebateRequest(BaseModel):
     agent_a_id: str
     agent_b_id: str
 
+
+class ProjectBudgetRequest(BaseModel):
+    enabled: bool = True
+    token_budget: int | None = None
+    cost_budget: float | None = None
+    currency: str = "USD"
+
 @router.post("/debate")
 async def start_debate(request: DebateRequest, background_tasks: BackgroundTasks):
     """
@@ -136,8 +145,8 @@ async def run_project_orchestrator(project_id: str, background_tasks: Background
     """
     Runs all queued tasks for a project in priority order.
     """
-    _ensure_project_is_mutable(project_id)
-    should_queue = use_queue if use_queue is not None else settings.TASK_EXECUTION_MODE == "queue"
+    project_service.ensure_project_is_mutable(project_id)
+    should_queue = use_queue if use_queue is not None else False
     if should_queue:
         try:
             result = await orchestrator_service.queue_project(project_id)
@@ -145,7 +154,8 @@ async def run_project_orchestrator(project_id: str, background_tasks: Background
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"message": "Project tasks queued for worker execution", **result}
 
-    background_tasks.add_task(orchestrator_service.run_project, project_id)
+    task = asyncio.create_task(orchestrator_service.run_project(project_id))
+    task.add_done_callback(lambda current: log_async_task_result(current, f"run_project({project_id})"))
     return {"message": "Project orchestrator started", "project_id": project_id, "mode": "direct"}
 
 @router.get("/projects/{project_id}/final-report")
@@ -157,6 +167,51 @@ async def get_project_final_report(project_id: str, variant: str = "full"):
         return await orchestrator_service.build_final_report(project_id, variant)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/projects/{project_id}/evidence")
+async def get_project_evidence(project_id: str, merge: bool = False):
+    """
+    Returns normalized claims extracted from structured task outputs.
+    Can optionally merge semantically similar claims.
+    """
+    project = supabase.table("projects").select("id").eq("id", project_id).single().execute().data
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    if merge:
+        claims = await evidence_service.merge_project_claims(project_id)
+    else:
+        claims = evidence_service.load_project_claims(project_id)
+        
+    return {
+        "project_id": project_id,
+        "merged": merge,
+        "summary": evidence_service.summarize_claims(claims),
+        "claims": claims,
+    }
+
+
+@router.get("/projects/{project_id}/budget")
+async def get_project_budget(project_id: str):
+    project_service.get_project_or_404(project_id)
+    return budget_service.project_budget_status(project_id)
+
+
+@router.put("/projects/{project_id}/budget")
+async def update_project_budget(project_id: str, request: ProjectBudgetRequest):
+    project = supabase.table("projects").select("id").eq("id", project_id).single().execute().data
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    budget_service.upsert_project_budget(
+        project_id=project_id,
+        enabled=request.enabled,
+        token_budget=request.token_budget,
+        cost_budget=request.cost_budget,
+        currency=request.currency,
+    )
+    return budget_service.project_budget_status(project_id)
+
 
 @router.get("/projects/{project_id}/final-report.pdf")
 async def download_project_final_report_pdf(project_id: str, variant: str = "full"):

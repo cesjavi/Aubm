@@ -1,8 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { FolderOpen, Play, RefreshCw, Search, SlidersHorizontal, Trash2, X } from 'lucide-react';
+import { getApiUrl } from '../services/runtimeConfig';
 import { motion } from 'framer-motion';
 import { supabase } from '../services/supabase';
 import { useAuth } from '../context/useAuth';
+import AubixIcon from './AubixIcon';
 import StatusBadge from './common/StatusBadge';
 
 interface Project {
@@ -20,7 +22,7 @@ interface Task {
 }
 
 interface DashboardProps {
-  onNewProject: () => void;
+  onNewProject: (data?: any) => void;
   onOpenProject: (projectId: string) => void;
 }
 
@@ -34,6 +36,9 @@ const Dashboard: React.FC<DashboardProps> = ({ onNewProject, onOpenProject }) =>
   const [statusFilter, setStatusFilter] = useState('all');
   const [progressFilter, setProgressFilter] = useState('all');
   const [sortBy, setSortBy] = useState('newest');
+  const [aiPrompt, setAiPrompt] = useState('');
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [magicFiles, setMagicFiles] = useState<File[]>([]);
 
   const loadDashboard = useCallback(async () => {
     if (!user) return;
@@ -85,6 +90,38 @@ const Dashboard: React.FC<DashboardProps> = ({ onNewProject, onOpenProject }) =>
       setError(`Error deleting project: ${deleteError.message}`);
     } else {
       loadDashboard();
+    }
+  };
+
+  const handleMagicGenerate = async () => {
+    if (!aiPrompt.trim()) return;
+    setIsGenerating(true);
+    
+    try {
+      const formData = new FormData();
+      formData.append('prompt', aiPrompt);
+      magicFiles.forEach(file => {
+        formData.append('files', file);
+      });
+
+      const apiUrl = getApiUrl();
+
+      const response = await fetch(`${apiUrl}/generator/generate-project`, {
+        method: 'POST',
+        body: formData
+      });
+
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || 'AI Generation failed');
+      
+      onNewProject(data); // Open NewProject wizard with pre-filled data
+      setAiPrompt('');
+      setMagicFiles([]);
+    } catch (err: any) {
+      console.error('Magic Generate Error:', err);
+      setError(`AI Error: ${err.message}`);
+    } finally {
+      setIsGenerating(false);
     }
   };
 
@@ -145,22 +182,94 @@ const Dashboard: React.FC<DashboardProps> = ({ onNewProject, onOpenProject }) =>
 
   return (
     <>
-      <div className="page-heading dashboard-heading">
+      <div className="page-heading dashboard-heading" style={{ marginBottom: 'var(--space-md)' }}>
         <div>
           <h2>Project Dashboard</h2>
           <p style={{ color: 'var(--text-dim)' }}>Monitor and manage your autonomous AI agent workflows.</p>
         </div>
         <div className="button-row">
           <button className="btn btn-glass" onClick={loadDashboard} disabled={loading}>
-            <RefreshCw size={18} />
+            <RefreshCw size={18} className={loading ? 'spin' : ''} />
             {loading ? 'Refreshing...' : 'Refresh'}
           </button>
-          <button className="btn btn-primary" onClick={onNewProject}>
+          <button className="btn btn-primary" onClick={() => onNewProject()}>
             <FolderOpen size={18} />
             New Project
           </button>
         </div>
       </div>
+
+      {/* AI Magic Bar (Aubix) */}
+      <section className="glass-panel magic-box" style={{ 
+        marginBottom: 'var(--space-xl)', 
+        padding: '12px 20px', 
+        border: '1px solid var(--accent)',
+        boxShadow: '0 0 30px rgba(110, 89, 255, 0.15)',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 'var(--space-lg)',
+        background: 'rgba(110, 89, 255, 0.05)'
+      }}>
+        <AubixIcon size={64} />
+        <div style={{ flex: 1 }}>
+          <div style={{ display: 'flex', gap: 'var(--space-sm)', position: 'relative' }}>
+             <input 
+               type="text" 
+               placeholder="Ask Aubix to build a project... (e.g. 'Audit the Aubm codebase using MD files')"
+               value={aiPrompt}
+               onChange={(e) => setAiPrompt(e.target.value)}
+               onKeyDown={(e) => e.key === 'Enter' && handleMagicGenerate()}
+               style={{
+                 width: '100%',
+                 padding: '12px 20px',
+                 paddingRight: '140px',
+                 background: 'rgba(0,0,0,0.2)',
+                 border: '1px solid var(--border)',
+                 borderRadius: 'var(--radius-md)',
+                 color: 'white',
+                 fontSize: '1rem',
+                 outline: 'none'
+               }}
+             />
+             <div style={{ position: 'absolute', right: '6px', top: '50%', transform: 'translateY(-50%)', display: 'flex', gap: '6px' }}>
+               <button 
+                 className="btn btn-sm btn-glass" 
+                 title="Reference Files"
+                 onClick={() => {
+                   const input = document.createElement('input');
+                   input.type = 'file';
+                   input.multiple = true;
+                   input.onchange = (e) => setMagicFiles(Array.from((e.target as HTMLInputElement).files || []));
+                   input.click();
+                 }}
+                 style={{ padding: '8px' }}
+               >
+                 <Search size={16} style={{ transform: 'rotate(45deg)' }} />
+                 {magicFiles.length > 0 && <span className="count-badge" style={{ position: 'absolute', top: '-5px', right: '-5px', background: 'var(--accent)', fontSize: '0.6rem', padding: '2px 4px', borderRadius: '50%' }}>{magicFiles.length}</span>}
+               </button>
+               <button 
+                 className="btn btn-sm btn-primary"
+                 onClick={handleMagicGenerate}
+                 disabled={isGenerating || !aiPrompt.trim()}
+                 style={{ minWidth: '80px' }}
+               >
+                 {isGenerating ? <RefreshCw className="spin" size={16} /> : <Play size={16} />}
+                 {isGenerating ? '...' : 'Generate'}
+               </button>
+             </div>
+          </div>
+          {magicFiles.length > 0 && (
+            <div style={{ display: 'flex', gap: '8px', marginTop: '8px', flexWrap: 'wrap' }}>
+              {magicFiles.map((f, i) => (
+                <span key={i} style={{ fontSize: '0.7rem', background: 'rgba(255,255,255,0.1)', padding: '2px 8px', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '6px', border: '1px solid rgba(255,255,255,0.1)' }}>
+                  {f.name}
+                  <X size={10} style={{ cursor: 'pointer', opacity: 0.5 }} onClick={() => setMagicFiles(prev => prev.filter((_, idx) => idx !== i))} />
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      </section>
 
       {error && <div className="inline-status">{error}</div>}
 

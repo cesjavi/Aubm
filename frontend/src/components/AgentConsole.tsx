@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { Terminal } from 'lucide-react';
 import { supabase } from '../services/supabase';
+import { getApiUrl } from '../services/runtimeConfig';
 
 interface LogEntry {
   id: string;
@@ -10,12 +11,24 @@ interface LogEntry {
   task_id: string | null;
 }
 
-const AgentConsole: React.FC = () => {
+interface AgentConsoleProps {
+  projectId?: string | null;
+  taskId?: string | null;
+}
+
+const AgentConsole: React.FC<AgentConsoleProps> = ({ projectId, taskId }) => {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    const appendLog = (newLog: LogEntry) => {
+      setLogs(prev => {
+        if (prev.some(l => l.id === newLog.id)) return prev;
+        return [...prev, newLog].slice(-50);
+      });
+    };
+
     const fetchLogs = async () => {
       const { data, error: supabaseError } = await supabase
         .from('agent_logs')
@@ -35,28 +48,67 @@ const AgentConsole: React.FC = () => {
       }
     };
 
-    fetchLogs();
-    
-    // Fallback polling every 3 seconds
-    const pollInterval = setInterval(fetchLogs, 3000);
-    
-    // Set up real-time subscription
-    const channel = supabase
-      .channel('agent_logs_changes')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'agent_logs' }, (payload) => {
-        setLogs(prev => {
-          const newLog = payload.new as LogEntry;
-          if (prev.some(l => l.id === newLog.id)) return prev;
-          return [...prev, newLog].slice(-50);
-        });
-      })
-      .subscribe();
+    const apiUrl = getApiUrl();
+    let eventSource: EventSource | null = null;
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+    let pollInterval: number | null = null;
+    let active = true;
+
+    const connectBackendStream = async () => {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token;
+        if (!active || !accessToken) {
+          setError('Authenticated log stream unavailable. Please refresh manually for latest logs.');
+          fetchLogs();
+          return;
+        }
+      const params = new URLSearchParams();
+      params.set('access_token', accessToken);
+      if (taskId) {
+        params.set('task_id', taskId);
+      } else if (projectId) {
+        params.set('project_id', projectId);
+      }
+      const query = params.toString();
+      eventSource = new EventSource(`${apiUrl}/tasks/logs/stream${query ? `?${query}` : ''}`);
+      eventSource.addEventListener('ready', () => setError(null));
+      eventSource.addEventListener('log', (event) => {
+        try {
+          appendLog(JSON.parse((event as MessageEvent).data) as LogEntry);
+          setError(null);
+        } catch (parseError) {
+          console.error('Error parsing log stream event:', parseError);
+        }
+      });
+      eventSource.addEventListener('error', () => {
+        setError('Backend log stream disconnected. Polling disabled to save resources.');
+        // fetchLogs(); // Manual fetch only or auto-reconnect logic without tight loops
+      });
+    };
+
+    if (apiUrl) {
+      connectBackendStream();
+    } else {
+      fetchLogs();
+      pollInterval = window.setInterval(() => {
+        if (document.visibilityState === 'visible') fetchLogs();
+      }, 15000);
+
+      channel = supabase
+        .channel('agent_logs_changes')
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'agent_logs' }, (payload) => {
+          appendLog(payload.new as LogEntry);
+        })
+        .subscribe();
+    }
 
     return () => {
-      clearInterval(pollInterval);
-      supabase.removeChannel(channel);
+      active = false;
+      if (eventSource) eventSource.close();
+      if (pollInterval) window.clearInterval(pollInterval);
+      if (channel) supabase.removeChannel(channel);
     };
-  }, []);
+  }, [projectId, taskId]);
 
   useEffect(() => {
     if (scrollRef.current) {

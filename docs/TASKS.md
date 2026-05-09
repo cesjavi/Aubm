@@ -49,11 +49,15 @@ Legend:
 - [x] Add admin user management support for manager role.
 - [x] Hide Google/GitHub auth buttons in the current login UI.
 - [x] Fix recursive profile admin policies with SECURITY DEFINER helper.
+- [x] Add final profile RLS hardening with owner/admin policies and role-protection trigger.
 - [/] Expand audit logging coverage across all LLM and workflow events.
 - [x] Add audit events for task run, queue, retry, approval, debate, decomposition, and report generation paths.
 - [x] Add audit trigger migration for direct project, task, agent, and profile mutations.
 - [ ] Move direct frontend mutations behind backend APIs where stricter authorization or validation is required.
-- [ ] Define enterprise auth policy before exposing OAuth buttons again.
+- [x] Add team permission migration with teams, team members, project team ownership, and project/task RLS helpers.
+- [x] Extend team permission migration to make `task_claims` visible through project access when the evidence table exists.
+- [ ] Add team management UI and team-aware project assignment flows.
+- [x] Define enterprise auth policy before exposing OAuth buttons again.
 - [ ] Replace broad team/security claims with tested team membership flows.
 
 ## Queue and Scale
@@ -78,12 +82,33 @@ Legend:
 - [x] Add heuristic output guardrails.
 - [x] Add final-report filtering for low-quality or placeholder sections.
 - [/] Require source URLs heuristically for sensitive factual claims.
-- [ ] Add strict JSON task schemas per task type.
-- [ ] Add claim table or normalized evidence model.
-- [ ] Add mandatory `source_url` for competitor, pricing, benchmark, release, market, and revenue claims.
-- [ ] Add entity normalization and alias merging.
-- [ ] Add semantic deduplication.
-- [ ] Build evidence-aware final report from validated claims only.
+- [/] Add strict JSON task schemas per task type.
+- [x] Add task schema classifier, prompt instructions, and approval gate for structured outputs.
+- [x] Add claim table or normalized evidence model.
+- [/] Add mandatory `source_url` for competitor, pricing, benchmark, release, market, and revenue claims.
+- [x] Extract structured findings/entities into `task_claims`.
+- [/] Add entity normalization and alias merging.
+- [x] Add normalized `entity_key` for extracted task claims.
+- [x] Add project-scoped entity alias table and canonicalize extracted claim entity keys before hashing.
+- [ ] Add alias management UX/API and curated competitor taxonomy.
+- [/] Add semantic deduplication.
+- [x] Add normalized claim hashes to dedupe repeated extracted claims per project.
+- [/] Build evidence-aware final report from validated claims only.
+- [x] Add normalized evidence summary to final reports from `task_claims`.
+- [x] Add project evidence API with normalized claims, source coverage, and entity/type summaries.
+
+## Intelligence and Memory
+
+- [x] Add project budget and usage tables.
+- [x] Add budget service with estimated token/cost accounting and pre-run blocking.
+- [x] Add project budget API endpoints.
+- [x] Prevent queued budget-blocked tasks from retrying as transient worker failures.
+- [ ] Replace estimated usage with provider-native token usage where available.
+- [ ] Add billing-grade pricing reconciliation.
+- [x] Add backend SSE stream for agent logs.
+- [x] Connect Agent Console to backend SSE stream with Supabase polling/realtime fallback.
+- [x] Add project/task-scoped log stream filtering.
+- [x] Add auth-aware log stream subscriptions.
 
 ## Documentation
 
@@ -93,4 +118,5 @@ Legend:
 - [x] Update operating guide.
 - [x] Update task tracker.
 - [x] Add a migration guide for existing Supabase projects.
+- [x] Add enterprise authentication model documentation.
 - [ ] Add API endpoint reference.

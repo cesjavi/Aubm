@@ -57,6 +57,7 @@ database/seed.sql
 database/phase3_updates.sql
 database/marketplace.sql
 database/enterprise_security.sql
+database/add_team_permissions.sql
 database/agent_ownership.sql
 database/task_owner_policies.sql
 database/default_agents.sql
@@ -71,8 +72,11 @@ database/add_task_queue_leasing.sql
 database/add_task_queue_retry_backoff.sql
 database/add_worker_heartbeats.sql
 database/add_audit_mutation_triggers.sql
+database/add_task_claims.sql
 database/add_profile_manager_role.sql
+database/fix_profiles_rls_final.sql
 database/fix_profiles_recursion.sql
+database/add_team_permissions.sql
 ```
 
 After schema changes, reload PostgREST when the migration includes:
@@ -188,6 +192,8 @@ SENTRY_DSN=optional_dsn
 - [SPEC.md](./SPEC.md): Technical architecture and contracts.
 - [ROADMAP.md](./ROADMAP.md): Current implementation status and next work.
 - [docs/OPERATING_GUIDE.md](./docs/OPERATING_GUIDE.md): Operational usage and setup.
+- [docs/AUTH_MODEL.md](./docs/AUTH_MODEL.md): Enterprise authentication and OAuth policy.
+- [docs/TASK_SCHEMAS.md](./docs/TASK_SCHEMAS.md): Structured task output schema rules.
 - [docs/MIGRATION_GUIDE.md](./docs/MIGRATION_GUIDE.md): Existing Supabase project migrations.
 - [docs/TASKS.md](./docs/TASKS.md): Implementation task tracker.
 - [docs/AUDIT.md](./docs/AUDIT.md): Stability and risk audit.

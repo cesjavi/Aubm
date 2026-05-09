@@ -1,9 +1,10 @@
 import React, { useRef, useState } from 'react';
-import { ArrowLeft, ArrowRight, CheckCircle2, FileText, Link2, Paperclip, PlusCircle, StickyNote, Trash2 } from 'lucide-react';
+import { ArrowLeft, ArrowRight, CheckCircle2, FileText, Link2, Paperclip, PlusCircle, RefreshCw, StickyNote, Trash2 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { supabase } from '../services/supabase';
 import { useAuth } from '../context/useAuth';
 import type { UiMode } from '../services/uiMode';
+import { getApiUrl } from '../services/runtimeConfig';
 
 type ProjectSource =
   | {
@@ -103,15 +104,19 @@ const wizardSteps = [
   {
     title: 'Review',
     description: 'Check the setup before creating the project. You will generate tasks from the project page after creation.'
+  },
+  {
+    title: 'Magic Generation',
+    description: 'Describe your project in natural language and attach reference docs. AI will pre-configure the workspace for you.'
   }
 ];
 
 const expertAccessStep = {
-  title: 'Access',
-  description: 'Decide whether this project should stay private or be visible to authenticated users in the workspace.'
+  title: 'Workspace',
+  description: 'Decide whether this project is personal or belongs to a team workspace.'
 };
 
-const NewProject: React.FC<{ uiMode: UiMode; onCreated?: () => void }> = ({ uiMode, onCreated }) => {
+const NewProject: React.FC<{ uiMode: UiMode; initialData?: any; onCreated?: () => void }> = ({ uiMode, initialData, onCreated }) => {
   const { user } = useAuth();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [name, setName] = useState('');
@@ -123,16 +128,99 @@ const NewProject: React.FC<{ uiMode: UiMode; onCreated?: () => void }> = ({ uiMo
   const [noteContent, setNoteContent] = useState('');
   const [sources, setSources] = useState<ProjectSource[]>([]);
   const [isPublic, setIsPublic] = useState(false);
+  const [teams, setTeams] = useState<{ id: string; name: string }[]>([]);
+  const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
   const [showAdvancedSources, setShowAdvancedSources] = useState(uiMode === 'expert');
   const [wizardStep, setWizardStep] = useState(0);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [aiPrompt, setAiPrompt] = useState('');
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generationFiles, setGenerationFiles] = useState<File[]>([]);
+  
+  React.useEffect(() => {
+    if (uiMode === 'expert') {
+      fetchTeams();
+    }
+  }, [uiMode]);
+
+  // Hydrate from Magic Bar / external data
+  React.useEffect(() => {
+    if (initialData) {
+      if (initialData.name) setName(initialData.name);
+      if (initialData.description) setDescription(initialData.description);
+      if (initialData.context) setContext(initialData.context);
+      if (initialData.sources && Array.isArray(initialData.sources)) {
+        const aiSources: ProjectSource[] = initialData.sources.map((s: any) => ({
+          id: crypto.randomUUID(),
+          ...s
+        }));
+        setSources(aiSources);
+      }
+      // If we have initial data, jump to step 0 of the wizard (Basics) 
+      // but ensure we are in the wizard view
+      setWizardStep(0);
+    }
+  }, [initialData]);
+
+  const handleAiGenerate = async () => {
+    if (!aiPrompt.trim()) return;
+    setIsGenerating(true);
+    setMessage('AI is analyzing your request and documents...');
+
+    try {
+      const formData = new FormData();
+      formData.append('prompt', aiPrompt);
+      generationFiles.forEach(file => {
+        formData.append('files', file);
+      });
+
+      const response = await fetch(`${getApiUrl()}/generator/generate-project`, {
+        method: 'POST',
+        body: formData
+      });
+
+      if (!response.ok) throw new Error('AI generation failed');
+      
+      const data = await response.json();
+      
+      setName(data.name || '');
+      setDescription(data.description || '');
+      setContext(data.context || '');
+      
+      if (data.sources && Array.isArray(data.sources)) {
+        const aiSources: ProjectSource[] = data.sources.map((s: any) => ({
+          id: crypto.randomUUID(),
+          ...s
+        }));
+        setSources(prev => [...prev, ...aiSources]);
+      }
+
+      setMessage('Success! AI has drafted your project. Review the fields in the next steps.');
+      setWizardStep(1);
+    } catch (err: any) {
+      console.error('AI Generation Error:', err);
+      setMessage(`AI Error: ${err.message}`);
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const fetchTeams = async () => {
+    try {
+      const { data, error } = await supabase.from('teams').select('id, name');
+      if (error) throw error;
+      setTeams(data || []);
+    } catch (err) {
+      console.error('Failed to fetch teams:', err);
+    }
+  };
   const isWizard = true;
   const projectWizardSteps = uiMode === 'expert'
-    ? [wizardSteps[0], wizardSteps[1], wizardSteps[2], expertAccessStep, wizardSteps[3]]
-    : wizardSteps;
+    ? [wizardSteps[4], wizardSteps[0], wizardSteps[1], wizardSteps[2], expertAccessStep, wizardSteps[3]]
+    : [wizardSteps[4], wizardSteps[0], wizardSteps[1], wizardSteps[2], wizardSteps[3]];
   const reviewStepIndex = projectWizardSteps.length - 1;
-  const accessStepIndex = uiMode === 'expert' ? 3 : -1;
+  const accessStepIndex = uiMode === 'expert' ? 4 : -1;
   const currentWizardStep = projectWizardSteps[wizardStep] ?? projectWizardSteps[0];
   const isFirstWizardStep = wizardStep === 0;
   const isLastWizardStep = wizardStep === reviewStepIndex;
@@ -232,6 +320,7 @@ const NewProject: React.FC<{ uiMode: UiMode; onCreated?: () => void }> = ({ uiMo
       description,
       context: contextPayload,
       owner_id: user.id,
+      team_id: selectedTeamId,
       is_public: isPublic,
       status: 'active'
     });
@@ -293,7 +382,91 @@ const NewProject: React.FC<{ uiMode: UiMode; onCreated?: () => void }> = ({ uiMo
           </div>
         )}
 
-        {(!isWizard || wizardStep === 0) && (
+        {wizardStep === 0 && (
+          <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} className="wizard-form">
+            <div className="form-group">
+              <label>What would you like to build?</label>
+              <textarea 
+                placeholder='e.g., "Make me a security audit project for a Fintech app. Use the attached compliance docs as reference. I need to focus on OWASP Top 10."'
+                value={aiPrompt}
+                onChange={(e) => setAiPrompt(e.target.value)}
+                style={{ height: '160px', resize: 'none' }}
+              />
+            </div>
+            
+            <div className="form-group">
+              <label>Reference Documents (Optional)</label>
+              <div 
+                className="drop-zone"
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const dropped = Array.from(e.dataTransfer.files);
+                  setGenerationFiles(prev => [...prev, ...dropped]);
+                }}
+                onClick={() => {
+                   const input = document.createElement('input');
+                   input.type = 'file';
+                   input.multiple = true;
+                   input.onchange = (e) => {
+                     const selected = Array.from((e.target as HTMLInputElement).files || []);
+                     setGenerationFiles(prev => [...prev, ...selected]);
+                   };
+                   input.click();
+                }}
+                style={{
+                  border: '2px dashed var(--border)',
+                  borderRadius: 'var(--radius-md)',
+                  padding: 'var(--space-xl)',
+                  textAlign: 'center',
+                  cursor: 'pointer',
+                  background: 'rgba(255,255,255,0.02)'
+                }}
+              >
+                <Paperclip size={24} style={{ marginBottom: '8px', opacity: 0.5 }} />
+                <p style={{ margin: 0 }}>Click or drag files to use as AI context</p>
+                <span style={{ fontSize: '0.8rem', opacity: 0.6 }}>Supports PDF, Text, Markdown, JSON</span>
+              </div>
+              
+              {generationFiles.length > 0 && (
+                <div style={{ marginTop: 'var(--space-md)', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  {generationFiles.map((f, i) => (
+                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.04)', padding: '8px 12px', borderRadius: '4px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.9rem' }}>
+                        <FileText size={14} />
+                        <span>{f.name}</span>
+                      </div>
+                      <button 
+                        className="btn-icon" 
+                        onClick={() => setGenerationFiles(prev => prev.filter((_, idx) => idx !== i))}
+                        style={{ color: 'var(--danger)' }}
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div style={{ marginTop: 'var(--space-xl)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <button className="btn btn-glass" type="button" onClick={() => setWizardStep(1)}>
+                Skip to manual setup
+              </button>
+              <button 
+                className="btn btn-primary" 
+                type="button"
+                onClick={handleAiGenerate}
+                disabled={!aiPrompt.trim() || isGenerating}
+              >
+                {isGenerating ? <RefreshCw className="spin" size={18} /> : <PlusCircle size={18} />}
+                {isGenerating ? 'Generating...' : 'Generate Project Structure'}
+              </button>
+            </div>
+          </motion.div>
+        )}
+
+        {wizardStep === 1 && (
         <>
         <div className="field-with-help">
           <label>
@@ -317,7 +490,7 @@ const NewProject: React.FC<{ uiMode: UiMode; onCreated?: () => void }> = ({ uiMo
         </>
         )}
 
-        {(!isWizard || wizardStep === 1) && (
+        {wizardStep === 2 && (
         <div className="field-with-help">
           <label>
             <span>Context</span>
@@ -329,7 +502,7 @@ const NewProject: React.FC<{ uiMode: UiMode; onCreated?: () => void }> = ({ uiMo
         </div>
         )}
 
-        {(!isWizard || wizardStep === 2) && (
+        {wizardStep === 3 && (
         <div className="default-agent-panel project-sources-panel" style={{ gap: 'var(--space-lg)' }}>
           <div className="settings-section-title">
             <Paperclip size={20} color="var(--accent)" />
@@ -426,19 +599,40 @@ const NewProject: React.FC<{ uiMode: UiMode; onCreated?: () => void }> = ({ uiMo
         </div>
         )}
 
-        {uiMode === 'expert' && (!isWizard || wizardStep === accessStepIndex) && (
-          <div className="field-with-help">
-            <label className="toggle-row">
-              <input type="checkbox" checked={isPublic} onChange={(event) => setIsPublic(event.target.checked)} />
-              <span>Make project visible to authenticated users</span>
-            </label>
-            <FieldHelp title="Visibility">
-              Public projects can be read by authenticated users in this workspace. Keep private work, client data, or regulated material off this setting.
-            </FieldHelp>
+        {uiMode === 'expert' && wizardStep === accessStepIndex && (
+          <div className="expert-access-fields" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-lg)' }}>
+            <div className="field-with-help">
+              <label>
+                <span>Team Workspace (Optional)</span>
+                <select 
+                  className="glass-input" 
+                  value={selectedTeamId || ''} 
+                  onChange={(e) => setSelectedTeamId(e.target.value || null)}
+                >
+                  <option value="">Personal Project (No Team)</option>
+                  {teams.map(team => (
+                    <option key={team.id} value={team.id}>{team.name}</option>
+                  ))}
+                </select>
+              </label>
+              <FieldHelp title="Shared Context">
+                Projects assigned to a team are visible to all team members according to their roles (admin, editor, viewer).
+              </FieldHelp>
+            </div>
+
+            <div className="field-with-help">
+              <label className="toggle-row">
+                <input type="checkbox" checked={isPublic} onChange={(event) => setIsPublic(event.target.checked)} />
+                <span>Make project visible to all authenticated users (Public)</span>
+              </label>
+              <FieldHelp title="Global Visibility">
+                Public projects can be read by any authenticated user in the entire platform. Use this for open templates or public datasets.
+              </FieldHelp>
+            </div>
           </div>
         )}
 
-        {isWizard && wizardStep === reviewStepIndex && (
+        {wizardStep === reviewStepIndex && (
           <div className="wizard-review">
             <div>
               <span>Project name</span>
@@ -447,6 +641,14 @@ const NewProject: React.FC<{ uiMode: UiMode; onCreated?: () => void }> = ({ uiMo
             <div>
               <span>Description</span>
               <p>{description.trim() || 'No description provided.'}</p>
+            </div>
+            <div>
+              <span>Workspace</span>
+              <p>{selectedTeamId ? `Team: ${teams.find(t => t.id === selectedTeamId)?.name}` : 'Personal project'}</p>
+            </div>
+            <div>
+              <span>Visibility</span>
+              <p>{isPublic ? 'Public' : 'Private'}</p>
             </div>
             <div>
               <span>Context</span>
@@ -467,35 +669,46 @@ const NewProject: React.FC<{ uiMode: UiMode; onCreated?: () => void }> = ({ uiMo
         )}
 
         <div className="field-with-help field-with-help-action">
-          {isWizard ? (
-            <div className="wizard-actions">
-              <button className="btn btn-glass" type="button" onClick={() => setWizardStep((step) => Math.max(0, step - 1))} disabled={isFirstWizardStep || saving}>
-                <ArrowLeft size={18} />
-                Back
-              </button>
-              {!isLastWizardStep ? (
-                <button
-                  className="btn btn-primary"
-                  type="button"
-                  onClick={() => setWizardStep((step) => Math.min(projectWizardSteps.length - 1, step + 1))}
-                  disabled={wizardStep === 0 && !name.trim()}
-                >
-                  Next
-                  <ArrowRight size={18} />
-                </button>
-              ) : (
-                <button className="btn btn-primary" type="submit" disabled={saving || !name.trim()}>
-                  <PlusCircle size={18} />
-                  {saving ? 'Creating...' : 'Create Project'}
-                </button>
-              )}
-            </div>
-          ) : (
-            <button className="btn btn-primary" type="submit" disabled={saving}>
-              <PlusCircle size={18} />
-              {saving ? 'Creating...' : 'Create Project'}
+          <div className="wizard-actions" style={{ display: 'flex', gap: 'var(--space-md)', width: '100%' }}>
+            <button 
+              className="btn btn-glass" 
+              type="button" 
+              onClick={() => setWizardStep((step) => Math.max(0, step - 1))} 
+              disabled={isFirstWizardStep || saving}
+              style={{ flex: 1 }}
+            >
+              <ArrowLeft size={18} />
+              Back
             </button>
-          )}
+            {!isLastWizardStep ? (
+              <button
+                className="btn btn-primary"
+                type="button"
+                onClick={() => {
+                  if (wizardStep === 1 && !name.trim()) {
+                    setMessage('Project name is required');
+                    return;
+                  }
+                  setWizardStep((step) => Math.min(projectWizardSteps.length - 1, step + 1));
+                }}
+                disabled={saving}
+                style={{ flex: 1 }}
+              >
+                Next
+                <ArrowRight size={18} />
+              </button>
+            ) : (
+              <button 
+                className="btn btn-primary" 
+                type="submit" 
+                disabled={saving || !name.trim()}
+                style={{ flex: 1 }}
+              >
+                {saving ? <RefreshCw className="spin" size={18} /> : <PlusCircle size={18} />}
+                {saving ? 'Creating...' : 'Create Project'}
+              </button>
+            )}
+          </div>
           <FieldHelp title="Next step">
             After creation, open the project and run the orchestrator to generate tasks. Review outputs before approving the final report.
           </FieldHelp>

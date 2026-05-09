@@ -1,6 +1,6 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, Response, JSONResponse
 import asyncio
 import logging
 import os
@@ -8,6 +8,8 @@ import json
 from pathlib import Path
 from dotenv import load_dotenv
 import sentry_sdk
+from services.orchestrator_service import orchestrator_service
+from services.infrastructure_service import infrastructure_service
 from services.config import settings
 from worker import AubmWorker
 
@@ -23,6 +25,13 @@ def _load_app_version() -> str:
 
 # Load environment variables
 load_dotenv()
+
+# Silence noisy libraries
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("supabase").setLevel(logging.WARNING)
+logging.getLogger("postgrest").setLevel(logging.WARNING)
+
 FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 APP_VERSION = _load_app_version()
 logger = logging.getLogger("aubm.api")
@@ -116,11 +125,12 @@ async def root():
     }
 
 # Placeholder for routers
-from routers import agent_runner, orchestrator, monitoring
+from routers import orchestrator, monitoring, agent_runner, generator
 
-app.include_router(agent_runner.router, prefix="/tasks", tags=["Tasks"])
-app.include_router(orchestrator.router, prefix="/orchestrator", tags=["Orchestration"])
-app.include_router(monitoring.router, prefix="/monitoring", tags=["Monitoring"])
+app.include_router(agent_runner.router, prefix="/api/tasks", tags=["Tasks"])
+app.include_router(orchestrator.router, prefix="/api/orchestrator", tags=["orchestrator"])
+app.include_router(generator.router, prefix="/api/generator", tags=["generator"])
+app.include_router(monitoring.router, prefix="/api/monitoring", tags=["Monitoring"])
 
 @app.get("/runtime-config.js", include_in_schema=False)
 async def runtime_config():
@@ -145,12 +155,45 @@ async def serve_frontend(path: str):
     if requested_path.is_file():
         return FileResponse(requested_path)
 
+
+
+    # For SPA routing, serve index.html for all other paths, 
+    # but NOT for paths starting with api/ (which should have been caught by routers)
+    if path.startswith("api/"):
+        return JSONResponse(status_code=404, content={"detail": f"API route not found: /{path}"})
+
     index_path = FRONTEND_DIST / "index.html"
     if index_path.exists():
         return FileResponse(index_path)
 
     return await root()
 
+# --- Infrastructure Management ---
+
+@app.post("/infrastructure/nodes/provision")
+async def provision_node(name: str = "aubm-inference-node", size: str = "s-4vcpu-8gb-amd"):
+    """Creates a new inference node on DigitalOcean."""
+    node = await infrastructure_service.create_inference_node(name, size)
+    if not node:
+        raise HTTPException(status_code=500, detail="Failed to initiate node provisioning.")
+    return node
+
+@app.get("/infrastructure/nodes/{droplet_id}/ip")
+async def get_node_ip(droplet_id: int):
+    """Wait and return the public IP of a node."""
+    ip = await infrastructure_service.wait_for_ip(droplet_id)
+    if not ip:
+        raise HTTPException(status_code=404, detail="IP not assigned or timed out.")
+    return {"ip": ip}
+
+@app.delete("/infrastructure/nodes/{droplet_id}")
+async def terminate_node(droplet_id: int):
+    """Destroy an inference node."""
+    success = await infrastructure_service.terminate_node(droplet_id)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to terminate node.")
+    return {"status": "termination_requested"}
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=settings.PORT, reload=True)
+    uvicorn.run(app, host="0.0.0.0", port=int(settings.PORT))

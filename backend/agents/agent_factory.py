@@ -5,6 +5,7 @@ from .amd_agent import AMDAgent
 from .groq_agent import GroqAgent
 from .gemini_agent import GeminiAgent
 from .local_agent import LocalAgent
+from .digitalocean_agent import DigitalOceanAgent
 from services.config import settings
 
 # Map of providers to their respective classes
@@ -14,7 +15,8 @@ PROVIDER_MAP: Dict[str, Type[BaseAgent]] = {
     "groq": GroqAgent,
     "gemini": GeminiAgent,
     "local": LocalAgent,
-    "ollama": LocalAgent
+    "ollama": LocalAgent,
+    "digitalocean": DigitalOceanAgent
 }
 
 class AgentFactory:

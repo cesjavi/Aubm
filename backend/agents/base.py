@@ -134,8 +134,8 @@ Please provide your output as a JSON object.
 
         response = await create_fn(**kwargs)
         message = response.choices[0].message
+        usage = getattr(response, "usage", None)
 
-        # Handle tool calls
         if message.tool_calls:
             messages.append(message)
             await self._append_tool_results(messages, message.tool_calls, tool_registry)
@@ -146,17 +146,34 @@ Please provide your output as a JSON object.
             kwargs.pop("tool_choice", None)
             
             final_response = await create_fn(**kwargs)
+            final_usage = getattr(final_response, "usage", None)
+            if usage and final_usage:
+                usage.prompt_tokens += final_usage.prompt_tokens
+                usage.completion_tokens += final_usage.completion_tokens
+                usage.total_tokens += final_usage.total_tokens
+            elif final_usage:
+                usage = final_usage
+
             content = final_response.choices[0].message.content
         else:
             content = message.content
 
-        return self._result(provider, content or "")
+        usage_dict = None
+        if usage:
+            usage_dict = {
+                "prompt_tokens": getattr(usage, "prompt_tokens", 0),
+                "completion_tokens": getattr(usage, "completion_tokens", 0),
+                "total_tokens": getattr(usage, "total_tokens", 0)
+            }
 
-    def _result(self, provider: str, content: str) -> Dict[str, Any]:
+        return self._result(provider, content or "", usage=usage_dict)
+
+    def _result(self, provider: str, content: str, usage: Optional[Dict[str, int]] = None) -> Dict[str, Any]:
         return {
             "agent_name": self.name,
             "provider": provider,
             "model": self.model,
             "raw_output": content,
+            "usage": usage,
             "data": self._parse_json_output(content)
         }

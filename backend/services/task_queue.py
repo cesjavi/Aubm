@@ -8,6 +8,67 @@ logger = logging.getLogger(__name__)
 
 class TaskQueueService:
     @staticmethod
+    def _claim_next_queued_task_fallback(worker_id: str, lease_seconds: int = 300, max_attempts: int = 3):
+        """
+        Fallback claim path when the RPC function is missing or broken in Supabase.
+        This is less strict than the DB-side atomic function, but it keeps single-worker
+        or low-contention setups operational.
+        """
+        now = datetime.now(timezone.utc)
+        lease_expires_at = now + timedelta(seconds=max(lease_seconds, 1))
+
+        rows = (
+            supabase.table("tasks")
+            .select("*")
+            .eq("status", "queued")
+            .order("priority", desc=True)
+            .order("created_at", desc=False)
+            .limit(25)
+            .execute()
+            .data
+            or []
+        )
+
+        candidate = None
+        for row in rows:
+            attempts = int(row.get("queue_attempts") or 0)
+            if attempts >= max_attempts:
+                continue
+
+            next_attempt_at = row.get("next_attempt_at")
+            if next_attempt_at and next_attempt_at > now.isoformat():
+                continue
+
+            current_lease = row.get("lease_expires_at")
+            if current_lease and current_lease > now.isoformat():
+                continue
+
+            candidate = row
+            break
+
+        if not candidate:
+            return None
+
+        attempts = int(candidate.get("queue_attempts") or 0)
+        result = (
+            supabase.table("tasks")
+            .update({
+                "status": "in_progress",
+                "queue_attempts": attempts + 1,
+                "leased_at": now.isoformat(),
+                "lease_expires_at": lease_expires_at.isoformat(),
+                "queue_worker_id": worker_id,
+            })
+            .eq("id", candidate["id"])
+            .eq("status", "queued")
+            .execute()
+        )
+
+        if result.data:
+            return result.data[0]
+        return None
+
+    @staticmethod
     async def queue_task(task_id: str):
         """
         Marks a task as 'queued' in the database.
@@ -20,6 +81,7 @@ class TaskQueueService:
                 "lease_expires_at": None,
                 "next_attempt_at": datetime.now(timezone.utc).isoformat(),
                 "queue_worker_id": None,
+                "queue_attempts": 0,
                 "last_error": None,
                 "output_data": None,
             }).eq("id", task_id).execute()
@@ -44,8 +106,16 @@ class TaskQueueService:
                 return result.data[0]
             return None
         except Exception as e:
-            logger.error(f"Error claiming next queued task: {e}")
-            return None
+            logger.error(f"Error claiming next queued task via RPC, using fallback: {e}")
+            try:
+                return TaskQueueService._claim_next_queued_task_fallback(
+                    worker_id,
+                    lease_seconds=lease_seconds,
+                    max_attempts=max_attempts,
+                )
+            except Exception as fallback_error:
+                logger.error(f"Fallback queue claim also failed: {fallback_error}")
+                return None
 
     @staticmethod
     async def get_next_queued_task():

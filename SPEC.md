@@ -169,7 +169,7 @@ Expert:
 
 - Supabase Auth is used for authentication.
 - Email/password is the visible login method in the current UI.
-- Google/GitHub OAuth buttons are hidden. If OAuth is enabled in Supabase, document the enterprise auth policy before exposing it again.
+- Google/GitHub OAuth buttons are hidden. If OAuth is enabled in Supabase, follow `docs/AUTH_MODEL.md` before exposing OAuth buttons again.
 - RLS policies protect project ownership, tasks, agents, templates, and profiles.
 - Admin profile checks use a SECURITY DEFINER helper to avoid recursive RLS policies.
 - Manager role is supported in profile constraints and admin tooling.
@@ -179,7 +179,7 @@ Expert:
 - Audit log coverage is incomplete.
 - Real-time logs are persisted, but true SSE/WebSocket streaming is not complete.
 - Cost control exists only as provider token configuration, not persisted budget enforcement.
-- Evidence-aware structured reporting is planned but not complete.
+- Structured task schemas and `task_claims` evidence extraction exist for common task types. Extracted claims include normalized entity keys and claim hashes. Final reports include normalized evidence summaries, but they are not yet built exclusively from normalized evidence.
 - Worker queue has atomic leasing, retry backoff, and heartbeat monitoring. Queue mode remains opt-in until it is made the default execution path.
 
 ## 7. Validation

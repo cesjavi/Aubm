@@ -37,6 +37,10 @@ Expert mode:
 - Project creation wizard: Basics, Context, Sources, Access, Review.
 - Advanced controls for dependencies, assignments, debate, voice, spatial view, monitoring, and settings.
 
+## Authentication
+
+Aubm uses Supabase Auth. The current UI exposes email/password sign-in only; Google/GitHub buttons are hidden until a deployment explicitly enables and verifies OAuth provider behavior. See [AUTH_MODEL.md](./AUTH_MODEL.md) for the enterprise authentication policy.
+
 ## Main Features
 
 ### Dashboard
@@ -186,9 +190,10 @@ Fresh project:
 3. `database/phase3_updates.sql`
 4. `database/marketplace.sql`
 5. `database/enterprise_security.sql`
-6. `database/agent_ownership.sql`
-7. `database/task_owner_policies.sql`
-8. `database/default_agents.sql`
+6. `database/add_team_permissions.sql`
+7. `database/agent_ownership.sql`
+8. `database/task_owner_policies.sql`
+9. `database/default_agents.sql`
 
 Common existing-project migrations:
 
@@ -198,10 +203,61 @@ Common existing-project migrations:
 - `database/add_task_queue_retry_backoff.sql`
 - `database/add_worker_heartbeats.sql`
 - `database/add_audit_mutation_triggers.sql`
+- `database/add_task_claims.sql`
+- `database/add_entity_aliases.sql`
+- `database/add_project_budgets.sql`
 - `database/add_profile_manager_role.sql`
+- `database/fix_profiles_rls_final.sql`
 - `database/fix_profiles_recursion.sql`
+- `database/add_team_permissions.sql`
 
 For a guided checklist, see [MIGRATION_GUIDE.md](./MIGRATION_GUIDE.md).
+
+## Project Budgets
+
+Apply `database/add_project_budgets.sql` before using budget APIs.
+
+Budget endpoints:
+
+- `GET /orchestrator/projects/{project_id}/budget`
+- `PUT /orchestrator/projects/{project_id}/budget`
+
+Example payload:
+
+```json
+{
+  "enabled": true,
+  "token_budget": 500000,
+  "cost_budget": 25,
+  "currency": "USD"
+}
+```
+
+Cost estimates use `app_config.model_pricing` when configured. Without pricing config, token budgets still block execution and cost estimates remain `0`.
+
+## Agent Log Streaming
+
+The backend exposes:
+
+```text
+GET /tasks/logs/stream
+```
+
+Optional filters:
+
+```text
+GET /tasks/logs/stream?access_token=<supabase-access-token>
+GET /tasks/logs/stream?access_token=<supabase-access-token>&project_id=<project-id>
+GET /tasks/logs/stream?access_token=<supabase-access-token>&task_id=<task-id>
+```
+
+The stream uses Server-Sent Events and emits:
+
+- `ready`: stream connection established.
+- `log`: an `agent_logs` row.
+- `error`: backend could not fetch logs.
+
+The frontend Agent Console uses this stream when `VITE_API_URL` is configured. If the stream is unavailable, it falls back to Supabase polling/realtime.
 
 ## Common Errors
 
@@ -244,6 +300,12 @@ Apply:
 ### Recursive profiles policy error
 
 Apply:
+
+```sql
+-- database/fix_profiles_rls_final.sql
+```
+
+For the older minimal fix:
 
 ```sql
 -- database/fix_profiles_recursion.sql

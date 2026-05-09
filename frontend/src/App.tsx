@@ -11,7 +11,9 @@ import {
   ShoppingBag,
   Volume2,
   Box,
-  Activity
+  Activity,
+  Users,
+  ShieldCheck
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from './context/useAuth';
@@ -28,12 +30,14 @@ import ProjectDetail from './components/ProjectDetail';
 import AgentsView from './components/AgentsView';
 import AgentConsole from './components/AgentConsole';
 import SplashScreen from './components/SplashScreen';
+import TeamsView from './components/TeamsView';
+import AuditView from './components/AuditView';
 import { useEffect } from 'react';
 import { getUiMode, saveUiMode } from './services/uiMode';
 import type { UiMode } from './services/uiMode';
 import { getAppVersion } from './services/runtimeConfig';
 
-type AppTab = 'dashboard' | 'project-detail' | 'agents' | 'marketplace' | 'debate' | 'voice' | 'spatial' | 'monitoring' | 'new-project' | 'settings';
+type AppTab = 'dashboard' | 'project-detail' | 'agents' | 'marketplace' | 'debate' | 'voice' | 'spatial' | 'monitoring' | 'teams' | 'audit' | 'new-project' | 'settings';
 
 const App: React.FC = () => {
   const { session, loading, signOut, profile, user } = useAuth();
@@ -42,6 +46,7 @@ const App: React.FC = () => {
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [initialTaskId, setInitialTaskId] = useState<string | null>(null);
   const [projectDetailReturnTab, setProjectDetailReturnTab] = useState<AppTab>('dashboard');
+  const [initialProjectData, setInitialProjectData] = useState<any>(null);
   const [uiMode, setUiMode] = useState<UiMode>(() => getUiMode());
   const [isSidebarOpen, setIsSidebarOpen] = useState(() => typeof window === 'undefined' || window.innerWidth >= 900);
   const [showSplash, setShowSplash] = useState(true);
@@ -161,6 +166,18 @@ const App: React.FC = () => {
                     active={activeTab === 'monitoring'}
                     onClick={() => navigateTo('monitoring')}
                   />
+                  <SidebarItem
+                    icon={<Users size={20} />}
+                    label="Teams"
+                    active={activeTab === 'teams'}
+                    onClick={() => navigateTo('teams')}
+                  />
+                  <SidebarItem
+                    icon={<ShieldCheck size={20} />}
+                    label="Audit Logs"
+                    active={activeTab === 'audit'}
+                    onClick={() => navigateTo('audit')}
+                  />
                 </>
               )}
               <SidebarItem 
@@ -215,7 +232,10 @@ const App: React.FC = () => {
         <section className="animate-fade-in app-content">
           {activeTab === 'dashboard' && (
             <Dashboard
-              onNewProject={() => navigateTo('new-project')}
+              onNewProject={(data?: any) => {
+                setInitialProjectData(data || null);
+                navigateTo('new-project');
+              }}
               onOpenProject={(projectId) => openProjectDetail(projectId)}
             />
           )}
@@ -243,7 +263,9 @@ const App: React.FC = () => {
             />
           )}
           {activeTab === 'monitoring' && uiMode === 'expert' && <MonitoringView />}
-          {activeTab === 'new-project' && <NewProject uiMode={uiMode} onCreated={() => navigateTo('dashboard')} />}
+          {activeTab === 'teams' && uiMode === 'expert' && <TeamsView />}
+          {activeTab === 'audit' && uiMode === 'expert' && <AuditView />}
+          {activeTab === 'new-project' && <NewProject uiMode={uiMode} initialData={initialProjectData} onCreated={() => { setInitialProjectData(null); navigateTo('dashboard'); }} />}
           {activeTab === 'settings' && <SettingsView uiMode={uiMode} onUiModeChange={updateUiMode} />}
         </section>
 

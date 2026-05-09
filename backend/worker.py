@@ -7,6 +7,7 @@ import uuid
 from services.task_queue import TaskQueueService
 from services.supabase_service import supabase
 from services.agent_runner_service import AgentRunnerService
+from services.budget_service import BudgetExceededError
 from services.config import settings
 
 logging.basicConfig(level=logging.INFO)
@@ -20,6 +21,7 @@ class AubmWorker:
         self.lease_seconds = int(os.getenv("AUBM_WORKER_LEASE_SECONDS", "300"))
         self.max_attempts = int(os.getenv("AUBM_WORKER_MAX_ATTEMPTS", "3"))
         self.retry_delay_seconds = int(os.getenv("AUBM_WORKER_RETRY_DELAY_SECONDS", "30"))
+        self.idle_poll_seconds = max(int(getattr(settings, "TASK_QUEUE_IDLE_POLL_SECONDS", 10)), 1)
         self.processed_count = 0
         self.failed_count = 0
 
@@ -37,6 +39,7 @@ class AubmWorker:
                 "lease_seconds": self.lease_seconds,
                 "max_attempts": self.max_attempts,
                 "retry_delay_seconds": self.retry_delay_seconds,
+                "idle_poll_seconds": self.idle_poll_seconds,
             },
         )
 
@@ -87,6 +90,11 @@ class AubmWorker:
                             logger.info("Task %s completed successfully.", task_id)
                         else:
                             raise RuntimeError(f"Assigned agent not found: {agent_id}")
+                    except BudgetExceededError as e:
+                        logger.warning("Budget blocked queued task %s: %s", task_id, e)
+                        self.failed_count += 1
+                        await TaskQueueService.mark_failed(task_id, str(e))
+                        await self.heartbeat("error")
                     except Exception as e:
                         logger.error("Failed to process task %s: %s", task_id, e)
                         self.failed_count += 1
@@ -96,10 +104,8 @@ class AubmWorker:
                             self.max_attempts,
                             self.retry_delay_seconds,
                         )
-                        await self.heartbeat("error")
                 else:
-                    # No tasks, sleep for a bit (10s)
-                    await asyncio.sleep(10)
+                    await asyncio.sleep(max(self.idle_poll_seconds, 1))
         finally:
             if heartbeat_task:
                 heartbeat_task.cancel()

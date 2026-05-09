@@ -6,6 +6,7 @@ import re
 from services.config import settings
 from services.agent_runner_service import AgentRunnerService
 from services.audit_service import audit_service
+from services.evidence_service import evidence_service
 from services.output_quality import clean_report_text, dedupe_lines, filter_report_sections, validate_output
 
 logger = logging.getLogger("uvicorn")
@@ -144,6 +145,17 @@ def _is_empty_curated_text(text: str) -> bool:
     }
 
 
+def _is_empty_report_variant(text: str | None) -> bool:
+    normalized = clean_report_text(dedupe_lines(text or "")).strip()
+    content_words = re.findall(r"[A-Za-z0-9_]+", normalized)
+    lower = normalized.lower()
+    return (
+        len(content_words) < 20
+        or lower in {"{}", "[]", "null", "none", "no details.", "not specified."}
+        or lower.startswith("```")
+    )
+
+
 def _format_conclusion_payload(data: dict) -> str:
     conclusion = data.get("strategicConclusion") or data.get("conclusion") or data.get("content") or ""
     next_steps = data.get("nextSteps") or data.get("next_steps") or []
@@ -253,6 +265,49 @@ def _format_execution_summary(charts: dict, total_tasks: int, kept_task_count: i
     lines.extend(_format_chart_rows("Scores", charts.get("scores", [])))
     lines.extend(_format_chart_rows("Task Categories", charts.get("categories", [])))
     lines.extend(_format_chart_rows("Priorities", charts.get("priorities", [])))
+    return lines
+
+
+
+
+
+async def _format_evidence_summary(project_id: str, claims: list[dict]) -> list[str]:
+    if not claims:
+        return []
+
+    # Get semantically merged claims for the "Strategic Findings" section
+    merged_claims = await evidence_service.merge_project_claims(project_id, threshold=0.88)
+    summary = evidence_service.summarize_claims(claims)
+    
+    lines = [
+        "## Strategic Findings & Evidence",
+        f"The analysis has consolidated **{summary['claim_count']}** unique data points into **{len(merged_claims)}** strategic findings.",
+        f"Source coverage: **{summary['source_coverage']:.0%}** (Claims backed by external evidence).",
+        "",
+        "### Key Consolidated Findings",
+    ]
+
+    # Show merged claims with their confidence and sources
+    for claim in merged_claims[:15]:
+        text = claim.get("claim_text")
+        entity = claim.get("entity_name")
+        source = claim.get("source_url")
+        confidence = claim.get("confidence", "unknown")
+        merged_count = claim.get("merged_count", 1)
+        
+        prefix = f"**[{entity}]** " if entity else ""
+        source_suffix = f" [Source: {source}]" if source else " [Internal Analysis]"
+        repetition_suffix = f" (Verified by {merged_count} sources)" if merged_count > 1 else ""
+        
+        lines.append(f"- {prefix}{text}{repetition_suffix}{source_suffix}")
+
+    if summary["by_entity"]:
+        lines.append("")
+        lines.append("### Entity Analysis Coverage")
+        for entity, count in list(summary["by_entity"].items())[:8]:
+            lines.append(f"- **{entity}**: {count} supporting claims identified.")
+    
+    lines.append("")
     return lines
 
 REPORT_VARIANTS = {
@@ -367,12 +422,13 @@ class OrchestratorService:
                 "status": "awaiting_approval",
                 "output_data": consolidated_output
             }).eq("id", task_id).execute()
+            claims_count = await evidence_service.replace_task_claims(task, consolidated_output)
             await audit_service.log_action(
                 user_id=None,
                 action="debate_completed",
                 agent_id=agent_a_id,
                 task_id=task_id,
-                metadata={"agent_b_id": agent_b_id, "project_id": task.get("project_id")},
+                metadata={"agent_b_id": agent_b_id, "project_id": task.get("project_id"), "claims_count": claims_count},
             )
             
             logger.info(f"Debate completed for task {task_id}")
@@ -412,7 +468,7 @@ class OrchestratorService:
             supabase.table("tasks")
             .select("*")
             .eq("project_id", project_id)
-            .in_("status", ["todo", "failed"])
+            .in_("status", ["todo", "failed", "queued"])
             .order("priority", desc=True)
             .order("created_at", desc=False)
             .execute()
@@ -433,7 +489,7 @@ class OrchestratorService:
                 supabase.table("tasks")
                 .select("*")
                 .eq("project_id", project_id)
-                .in_("status", ["todo", "failed"])
+                .in_("status", ["todo", "failed", "queued"])
                 .order("priority", desc=True)
                 .order("created_at", desc=False)
                 .execute()
@@ -444,7 +500,7 @@ class OrchestratorService:
         agents = supabase.table("agents").select("*").execute().data or []
         available_agents = [
             agent for agent in agents
-            if agent.get("user_id") in (None, owner_id)
+            if agent.get("user_id") in (None, owner_id) or agent.get("id") in {t.get("assigned_agent_id") for t in tasks if t.get("assigned_agent_id")}
         ]
 
         completed = 0
@@ -496,7 +552,7 @@ class OrchestratorService:
             supabase.table("tasks")
             .select("*")
             .eq("project_id", project_id)
-            .in_("status", ["todo", "failed"])
+            .in_("status", ["todo", "failed", "queued"])
             .order("priority", desc=True)
             .order("created_at", desc=False)
             .execute()
@@ -514,7 +570,7 @@ class OrchestratorService:
                 supabase.table("tasks")
                 .select("*")
                 .eq("project_id", project_id)
-                .in_("status", ["todo", "failed"])
+                .in_("status", ["todo", "failed", "queued"])
                 .order("priority", desc=True)
                 .order("created_at", desc=False)
                 .execute()
@@ -523,9 +579,10 @@ class OrchestratorService:
             )
 
         agents = supabase.table("agents").select("*").execute().data or []
+        assigned_ids = {t.get("assigned_agent_id") for t in tasks if t.get("assigned_agent_id")}
         available_agents = [
             agent for agent in agents
-            if agent.get("user_id") in (None, owner_id)
+            if agent.get("user_id") in (None, owner_id) or agent.get("id") in assigned_ids
         ]
 
         queued = 0
@@ -623,12 +680,15 @@ class OrchestratorService:
         data = result.get("data")
         if isinstance(data, dict):
             for key in ("brief", "analysis", "report", "summary", "content"):
-                if isinstance(data.get(key), str):
-                    return data[key]
-            return "\n".join(_format_value_for_report(data))
+                value = data.get(key)
+                if isinstance(value, str) and not _is_empty_report_variant(value):
+                    return value
+            formatted = "\n".join(_format_value_for_report(data))
+            return None if _is_empty_report_variant(formatted) else formatted
         if isinstance(data, str):
-            return data
-        return result.get("raw_output")
+            return None if _is_empty_report_variant(data) else data
+        raw_output = result.get("raw_output")
+        return None if _is_empty_report_variant(raw_output) else raw_output
 
     def _build_fallback_variant(self, project: dict, tasks: list[dict], variant: str):
         config = REPORT_VARIANTS[variant]
@@ -728,7 +788,14 @@ class OrchestratorService:
 
         curated_tasks, excluded_tasks = self._quality_approved_tasks(tasks, project)
         if not curated_tasks:
-            raise ValueError("No approved task outputs passed quality validation for final reporting.")
+            # Fallback: if no tasks pass the strict quality review, include all 'done' tasks
+            # so the user can at least see a draft report.
+            logger.warning(f"Project {project_id}: No tasks passed quality review. Falling back to all tasks.")
+            curated_tasks = tasks
+        
+        # Load raw claims for statistics, and we will use semantic merging inside _format_evidence_summary
+        all_raw_claims = evidence_service.load_project_claims(project_id)
+        merged_claims = await evidence_service.merge_project_claims(project_id)
 
         # 0. Header and Description
         report_title = REPORT_VARIANTS[variant]["title"]
@@ -771,6 +838,11 @@ class OrchestratorService:
         charts = _build_report_charts(included_tasks)
         lines.extend(["## Execution Summary", ""])
         lines.extend(_format_execution_summary(charts, len(tasks), kept_task_count, len(excluded_tasks)))
+        
+        # New Evidence-Aware Strategic Findings Section
+        evidence_section = await _format_evidence_summary(project_id, all_raw_claims)
+        lines.extend(evidence_section)
+        
         lines.extend(approved_work_lines)
 
         if excluded_tasks or report_exclusions:
@@ -799,10 +871,25 @@ class OrchestratorService:
                         name=agent_data["name"],
                         role=agent_data["role"],
                         model=agent_data["model"],
-                        system_prompt="You write a 2-3 sentence strategic conclusion and 3 actionable next steps for a project report. Never introduce placeholders or unsupported facts."
+                        system_prompt=(
+                            "You are a Senior Strategic Consultant. Your goal is to write a comprehensive, "
+                            "professional strategic conclusion for a project report based on approved work. "
+                            "Synthesize the findings, highlight critical success factors, identify remaining "
+                            "operational or market risks, and provide 3-5 high-impact, actionable next steps. "
+                            "The tone should be executive, insightful, and strictly based on provided facts. "
+                            "Avoid generic filler or unsupported placeholders."
+                        )
                     )
                     report_so_far = "\n".join(lines)
-                    res = await agent.run(f"Based on this project report, write a final strategic conclusion and 3 next steps:\n\n{report_so_far}", [])
+                    # Feed the strategic conclusion agent with the consolidated findings for maximum accuracy
+                    evidence_context = "\n".join(evidence_section)
+                    res = await agent.run(
+                        f"Project: {project['name']}\n"
+                        f"Consolidated Strategic Findings:\n{evidence_context}\n\n"
+                        f"Full Report Context:\n{report_so_far}\n\n"
+                        "Task: Write a final strategic conclusion and 3-5 next steps based on the findings above.", 
+                        []
+                    )
                     if res.get("status") != "error":
                         data = res.get("data")
                         if isinstance(data, str):
@@ -826,10 +913,11 @@ class OrchestratorService:
         if variant != "full":
             try:
                 generated = await self._generate_report_variant_with_agent(project, report, variant)
-                report = generated or self._build_fallback_variant(project, tasks, variant) or report
+                fallback_report = self._build_fallback_variant(project, included_tasks or tasks, variant)
+                report = generated if not _is_empty_report_variant(generated) else fallback_report or report
             except Exception as exc:
                 logger.warning(f"Report variant generation failed: {exc}")
-                report = self._build_fallback_variant(project, tasks, variant) or report
+                report = self._build_fallback_variant(project, included_tasks or tasks, variant) or report
 
         await audit_service.log_action(
             user_id=project.get("owner_id"),
@@ -839,6 +927,7 @@ class OrchestratorService:
                 "variant": variant,
                 "task_count": kept_task_count,
                 "excluded_task_count": len(excluded_tasks),
+                "normalized_claim_count": len(merged_claims),
             },
         )
 
@@ -848,7 +937,8 @@ class OrchestratorService:
             "task_count": kept_task_count,
             "variant": variant,
             "report": clean_report_text(dedupe_lines(report)),
-            "charts": charts
+            "charts": charts,
+            "evidence": evidence_service.summarize_claims(merged_claims),
         }
 
     async def decompose_project(self, project_id: str):

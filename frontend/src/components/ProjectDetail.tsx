@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, Bot, CheckCircle2, Download, FilePenLine, FileText, ListTodo, Map as MapIcon, PlayCircle, PlusCircle, RefreshCw, Trash2, X } from 'lucide-react';
+import { ArrowLeft, Bot, CheckCircle2, Database, Download, FilePenLine, FileText, ListTodo, Map as MapIcon, PlayCircle, PlusCircle, RefreshCw, Trash2, X } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { supabase } from '../services/supabase';
 import { useAuth } from '../context/useAuth';
 import { getDefaultModel, getDefaultProvider } from '../services/llmConfig';
-import { getApiUrl } from '../services/runtimeConfig';
+import { getApiUrl, getApiUrlCandidates } from '../services/runtimeConfig';
 import type { UiMode } from '../services/uiMode';
+import EvidenceView from './EvidenceView';
 
 interface Project {
   id: string;
@@ -46,6 +47,16 @@ interface ProjectDetailProps {
 
 const getBackendErrorDetail = async (response: Response) => {
   let detail = `Backend returned ${response.status}`;
+  const contentType = response.headers.get('content-type') || '';
+
+  if (!contentType.includes('application/json')) {
+    const body = await response.text().catch(() => '');
+    if (body.trimStart().toLowerCase().startsWith('<!doctype')) {
+      return 'Backend API returned the frontend HTML page. Check that the API URL points to the backend /api route and refresh the built frontend.';
+    }
+    return body || detail;
+  }
+
   try {
     const body = await response.json();
     detail = body.detail || body.message || detail;
@@ -60,6 +71,33 @@ const ensureBackendOk = async (response: Response, fallback?: string) => {
     const detail = fallback ?? (await getBackendErrorDetail(response));
     throw new Error(detail);
   }
+};
+
+const readBackendJson = async <T,>(response: Response): Promise<T> => {
+  const contentType = response.headers.get('content-type') || '';
+
+  if (!contentType.includes('application/json')) {
+    throw new Error(await getBackendErrorDetail(response));
+  }
+
+  return response.json() as Promise<T>;
+};
+
+const fetchBackendJson = async <T,>(path: string, init?: RequestInit): Promise<T> => {
+  let lastError: Error | null = null;
+
+  for (const apiUrl of getApiUrlCandidates()) {
+    try {
+      const response = await fetch(`${apiUrl}${path}`, init);
+      await ensureBackendOk(response);
+      return await readBackendJson<T>(response);
+    } catch (exc) {
+      lastError = exc instanceof Error ? exc : new Error('Backend request failed.');
+      if (!lastError.message.includes('frontend HTML page')) break;
+    }
+  }
+
+  throw lastError ?? new Error('Backend request failed.');
 };
 
 const hasTaskErrorOutput = (task: Task) =>
@@ -92,6 +130,9 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
   const [showRoadmap, setShowRoadmap] = useState(false);
   const [reportLoading, setReportLoading] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState<'tasks' | 'evidence'>('tasks');
+  const [isEditingOutput, setIsEditingOutput] = useState(false);
+  const [editedOutput, setEditedOutput] = useState('');
   const defaultProvider = getDefaultProvider();
   const defaultModel = getDefaultModel(defaultProvider);
 
@@ -400,7 +441,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
       }
 
       const apiUrl = getApiUrl();
-      const response = await fetch(`${apiUrl}/orchestrator/projects/${projectId}/run`, {
+      const response = await fetch(`${apiUrl}/orchestrator/projects/${projectId}/run?use_queue=false`, {
         method: 'POST'
       });
 
@@ -409,7 +450,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
         `Backend returned ${response.status} for POST /orchestrator/projects/${projectId}/run. Stop the stale process on port 8000 and restart backend from D:\\sistemas\\Aubm\\backend.`
       );
       const body = await response.json().catch(() => null);
-      setMessage(body?.mode === 'queue' ? 'Project tasks queued for worker execution.' : 'Project orchestrator started for queued and failed tasks.');
+      setMessage(body?.mode === 'queue' ? 'Project tasks queued for worker execution.' : 'Project execution started immediately.');
       // Refresh after a delay to show the new tasks
       window.setTimeout(loadProject, 2000);
     } catch (exc) {
@@ -635,19 +676,45 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
     setMessage(null);
 
     try {
-      const apiUrl = getApiUrl();
-
-      const response = await fetch(`${apiUrl}/orchestrator/projects/${projectId}/final-report?variant=${variant}`);
-      await ensureBackendOk(response);
-
-      const body = await response.json();
-      setFinalReport(body.report);
+      const body = await fetchBackendJson<{ report: string }>(
+        `/orchestrator/projects/${projectId}/final-report?variant=${variant}`
+      );
+      const report = body.report?.trim();
+      if (!report) {
+        throw new Error('The backend returned an empty report.');
+      }
+      setFinalReport(report);
       setFinalReportVariant(variant);
       await loadProject();
     } catch (exc) {
       setError(exc instanceof Error ? exc.message : 'Failed to build final report.');
     } finally {
       setReportLoading(false);
+    }
+  };
+
+  const saveEditedOutput = async () => {
+    if (!selectedTask || !canModifyProject) return;
+    setTaskActionPending(true);
+    setTaskActionError(null);
+    try {
+      const apiUrl = getApiUrl();
+      const response = await fetch(`${apiUrl}/tasks/${selectedTask.id}/output`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ output_data: editedOutput })
+      });
+      await ensureBackendOk(response);
+      
+      const updatedTask = { ...selectedTask, output_data: editedOutput };
+      setSelectedTask(updatedTask);
+      setTasks(prev => prev.map(t => t.id === updatedTask.id ? updatedTask : t));
+      setIsEditingOutput(false);
+      setMessage('Task output updated manually.');
+    } catch (exc) {
+      setTaskActionError(exc instanceof Error ? exc.message : 'Failed to update output.');
+    } finally {
+      setTaskActionPending(false);
     }
   };
 
@@ -688,48 +755,68 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
           <h2>{project?.name ?? 'Project'}</h2>
           <p style={{ color: 'var(--text-dim)' }}>{project?.description || 'No description provided.'}</p>
         </div>
-        <div className="button-row">
-          {tasks.length > 0 && (
-            <button className="btn btn-glass" onClick={() => setShowRoadmap(true)}>
-              <MapIcon size={18} />
-              Roadmap
+        <div className="project-actions-container" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)', alignItems: 'flex-end' }}>
+          <div className="action-group" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-xs)', width: '100%', alignItems: 'flex-end' }}>
+            <button className="btn btn-glass btn-sm" onClick={loadProject} style={{ width: 'fit-content' }}>
+              <RefreshCw size={16} />
+              Refresh
             </button>
-          )}
-          {allTasksApproved && (
-            <button className="btn btn-primary" onClick={() => openFinalReport('full')} disabled={reportLoading}>
-              <FileText size={18} />
-              {reportLoading ? 'Building...' : 'Final Report'}
-            </button>
-          )}
-          {allTasksApproved && (
-            <button className="btn btn-glass" onClick={() => openFinalReport('brief')} disabled={reportLoading}>
-              <FileText size={18} />
-              Short Brief
-            </button>
-          )}
-          {allTasksApproved && (
-            <button className="btn btn-glass" onClick={() => openFinalReport('pessimistic')} disabled={reportLoading}>
-              <FileText size={18} />
-              Pessimistic Analysis
-            </button>
-          )}
-          {canModifyProject && tasks.some(t => t.status === 'awaiting_approval') && (
-            <button className="btn btn-glass" onClick={handleApproveAll} disabled={approvingAll} style={{ borderColor: 'var(--success)', color: 'var(--success)' }}>
-              <CheckCircle2 size={18} />
-              {approvingAll ? 'Approving...' : 'Approve All'}
-            </button>
-          )}
-          {canModifyProject && (
-            <button className="btn btn-primary" onClick={runOrchestrator} disabled={orchestrating}>
-              <PlayCircle size={18} />
-              {orchestrating ? 'Starting...' : retryableTasks > 0 ? `Retry Failed (${retryableTasks})` : 'Run Orchestrator'}
-            </button>
-          )}
-          <button className="btn btn-glass" onClick={loadProject}>
-            <RefreshCw size={18} />
-            Refresh
-          </button>
+            {tasks.length > 0 && (
+              <button className="btn btn-glass btn-sm" onClick={() => setShowRoadmap(true)} style={{ width: 'fit-content' }}>
+                <MapIcon size={16} />
+                Roadmap
+              </button>
+            )}
+          </div>
+
+          <div style={{ height: 'var(--space-md)' }} /> {/* Separator */}
+
+          <div className="action-group reports-group" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-xs)', width: '100%', alignItems: 'flex-end' }}>
+            {allTasksApproved && (
+              <>
+                <button 
+                  className="btn btn-primary btn-final-report" 
+                  onClick={() => openFinalReport('full')} 
+                  disabled={reportLoading}
+                  style={{
+                    background: 'linear-gradient(135deg, var(--accent) 0%, #7c3aed 100%)',
+                    boxShadow: '0 4px 15px rgba(124, 58, 237, 0.3)',
+                    fontWeight: 700,
+                    padding: '0.8rem 1.5rem',
+                    width: '100%',
+                    justifyContent: 'center'
+                  }}
+                >
+                  <FileText size={18} />
+                  {reportLoading ? 'Building...' : 'Final Report'}
+                </button>
+                <button className="btn btn-glass btn-sm" onClick={() => openFinalReport('brief')} disabled={reportLoading} style={{ width: '100%', justifyContent: 'center' }}>
+                  <FileText size={16} />
+                  Brief Summary
+                </button>
+                <button className="btn btn-glass btn-sm" onClick={() => openFinalReport('pessimistic')} disabled={reportLoading} style={{ width: '100%', justifyContent: 'center' }}>
+                  <FileText size={16} />
+                  Risks Analysis
+                </button>
+              </>
+            )}
+            
+            {canModifyProject && tasks.some(t => t.status === 'awaiting_approval') && (
+              <button className="btn btn-glass" onClick={handleApproveAll} disabled={approvingAll} style={{ borderColor: 'var(--success)', color: 'var(--success)', width: '100%', justifyContent: 'center' }}>
+                <CheckCircle2 size={18} />
+                Approve All
+              </button>
+            )}
+            
+            {canModifyProject && (
+              <button className="btn btn-primary" onClick={runOrchestrator} disabled={orchestrating} style={{ width: '100%', justifyContent: 'center' }}>
+                <PlayCircle size={18} />
+                {orchestrating ? 'Starting...' : retryableTasks > 0 ? `Retry (${retryableTasks})` : 'Run'}
+              </button>
+            )}
+          </div>
         </div>
+
       </div>
 
       {error && <div className="inline-status">{error}</div>}
@@ -793,8 +880,29 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
         </section>
       )}
 
+      <div className="tab-navigation glass-panel" style={{ marginBottom: 'var(--space-md)', padding: '4px', display: 'flex', gap: '4px' }}>
+        <button 
+          className={`btn ${activeTab === 'tasks' ? 'btn-primary' : 'btn-glass'}`} 
+          onClick={() => setActiveTab('tasks')}
+          style={{ flex: 1, justifyContent: 'center' }}
+        >
+          <ListTodo size={18} />
+          Tasks
+        </button>
+        <button 
+          className={`btn ${activeTab === 'evidence' ? 'btn-primary' : 'btn-glass'}`} 
+          onClick={() => setActiveTab('evidence')}
+          style={{ flex: 1, justifyContent: 'center' }}
+        >
+          <Database size={18} />
+          Evidence & Entities
+        </button>
+      </div>
+
       <div className="project-detail-grid">
-        <section className="glass-panel project-form">
+        {activeTab === 'tasks' ? (
+          <>
+            <section className="glass-panel project-form">
           {(uiMode === 'expert' || showAdvancedTaskControls) && (
           <div className="default-agent-panel">
             <div>
@@ -1024,14 +1132,57 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
             ))}
           </div>
         </section>
+          </>
+        ) : (
+          <section className="glass-panel evidence-panel" style={{ gridColumn: '1 / -1' }}>
+            <div className="settings-section-title">
+              <Database size={22} color="var(--accent)" />
+              <h3>Project Evidence & Entity Intelligence</h3>
+            </div>
+            <EvidenceView projectId={projectId} />
+          </section>
+        )}
       </div>
 
       {selectedTask && (
         <div className="modal-overlay" onClick={() => setSelectedTask(null)}>
           <div className="glass-panel modal-content task-review-modal" onClick={(e) => e.stopPropagation()}>
             <h3>Review: {selectedTask.title}</h3>
-            <div className="task-output-preview">
-              <pre>{formatTaskOutput(selectedTask.output_data)}</pre>
+            <div className="task-output-preview" style={{ position: 'relative' }}>
+              {isEditingOutput ? (
+                <textarea
+                  className="edit-output-textarea"
+                  value={editedOutput}
+                  onChange={(e) => setEditedOutput(e.target.value)}
+                  style={{
+                    width: '100%',
+                    height: '400px',
+                    background: 'rgba(0,0,0,0.2)',
+                    color: 'var(--text-main)',
+                    border: '1px solid var(--accent)',
+                    borderRadius: '8px',
+                    padding: 'var(--space-md)',
+                    fontFamily: 'monospace',
+                    fontSize: '0.9rem'
+                  }}
+                />
+              ) : (
+                <pre>{formatTaskOutput(selectedTask.output_data)}</pre>
+              )}
+              
+              {canModifyProject && !hasTaskErrorOutput(selectedTask) && selectedTask.status !== 'done' && (
+                <button 
+                  className="btn btn-glass btn-sm" 
+                  onClick={() => {
+                    if (!isEditingOutput) setEditedOutput(formatTaskOutput(selectedTask.output_data));
+                    setIsEditingOutput(!isEditingOutput);
+                  }}
+                  style={{ position: 'absolute', top: '-40px', right: '0' }}
+                >
+                  <FilePenLine size={14} />
+                  {isEditingOutput ? 'Cancel Editing' : 'Edit Output Manually'}
+                </button>
+              )}
             </div>
             {taskActionError && <div className="inline-status modal-error">{taskActionError}</div>}
             <div className="button-row modal-actions">
@@ -1048,6 +1199,10 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
                     This task has a saved execution error and needs to be retried.
                   </div>
                 </>
+              ) : isEditingOutput ? (
+                <button className="btn btn-primary" onClick={saveEditedOutput} disabled={taskActionPending}>
+                  {taskActionPending ? 'Saving...' : 'Save Changes'}
+                </button>
               ) : selectedTask.status === 'awaiting_approval' ? (
                 <>
                   <button className="btn btn-primary" onClick={() => approveTask(selectedTask.id)} disabled={taskActionPending}>
@@ -1062,7 +1217,10 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
                   This task is completed and approved.
                 </div>
               )}
-              <button className="btn btn-glass" onClick={() => setSelectedTask(null)} disabled={taskActionPending}>
+              <button className="btn btn-glass" onClick={() => {
+                setSelectedTask(null);
+                setIsEditingOutput(false);
+              }} disabled={taskActionPending}>
                 Close
               </button>
             </div>
@@ -1128,7 +1286,13 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projectId, uiMode, initia
       {finalReport && (
         <div className="modal-overlay" onClick={() => setFinalReport(null)}>
           <div className="glass-panel modal-content task-review-modal" onClick={(e) => e.stopPropagation()}>
-            <h3>Final Report</h3>
+            <h3>
+              {finalReportVariant === 'brief'
+                ? 'Brief Summary'
+                : finalReportVariant === 'pessimistic'
+                  ? 'Risks Analysis'
+                  : 'Final Report'}
+            </h3>
             <div className="task-output-preview final-report-preview">
               <pre>{finalReport}</pre>
             </div>

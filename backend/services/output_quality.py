@@ -2,6 +2,7 @@ import json
 import re
 from collections import OrderedDict
 from typing import Any
+from services.task_schemas import schema_instructions_for_task, validate_task_schema
 
 PLACEHOLDER_PATTERNS = [
     r"\bCompetitor\s+[A-Z]\b",
@@ -114,6 +115,10 @@ def build_quality_instructions(task: dict) -> str:
             ]
         )
 
+    schema_instructions = schema_instructions_for_task(task)
+    if schema_instructions:
+        base.extend(["", schema_instructions])
+
     return "\n".join(base)
 
 
@@ -170,6 +175,7 @@ def validate_output(task: dict, result: dict) -> dict:
     unsupported_claims: list[str] = []
     duplicate_claims: list[str] = []
     encoding_issues: list[str] = []
+    schema_review = validate_task_schema(task, result)
 
     if not combined:
         fail_reasons.append("Empty output.")
@@ -188,6 +194,10 @@ def validate_output(task: dict, result: dict) -> dict:
     if encoding_issues:
         fail_reasons.append("Output contains encoding corruption.")
         must_fix.append("Remove corrupted characters and normalize text encoding.")
+
+    if not schema_review["approved"]:
+        fail_reasons.extend(schema_review["fail_reasons"])
+        must_fix.append("Regenerate the output as valid JSON matching the task schema.")
 
     if _looks_like_raw_dump(combined):
         fail_reasons.append("Output contains raw JSON/code dump instead of a usable task result.")
@@ -245,6 +255,8 @@ def validate_output(task: dict, result: dict) -> dict:
         score = min(score, 60)
     if encoding_issues:
         score = min(score, 60)
+    if not schema_review["approved"]:
+        score = min(score, 15)
     if not combined:
         score = 0
 
@@ -258,6 +270,7 @@ def validate_output(task: dict, result: dict) -> dict:
         "unsupported_claims": list(OrderedDict.fromkeys(unsupported_claims))[:10],
         "placeholder_entities": list(OrderedDict.fromkeys(placeholder_entities))[:10],
         "encoding_issues": encoding_issues,
+        "schema_review": schema_review,
     }
 
 

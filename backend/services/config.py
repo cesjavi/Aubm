@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     # Supabase
     SUPABASE_URL: str = ""
     SUPABASE_SERVICE_ROLE_KEY: str = ""
-    
+
     # AI Providers
     OPENAI_API_KEY: Optional[str] = None
     GROQ_API_KEY: Optional[str] = None
@@ -15,11 +15,19 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: Optional[str] = None
     AMD_API_KEY: Optional[str] = None
     TAVILY_API_KEY: Optional[str] = None
-    
+
+    # Infrastructure (DigitalOcean)
+    DO_API_TOKEN: Optional[str] = None
+    DO_INFERENCE_KEY: Optional[str] = None
+    DO_AGENT_ACCESS_KEY: Optional[str] = None
+    DO_AGENT_ENDPOINT: Optional[str] = None
+    DO_REGION: str = "nyc3"
+
     # App Config
     TASK_QUEUE_EMBEDDED_WORKER: bool = True
     TASK_QUEUE_HEARTBEAT_ENABLED: bool = True
     TASK_EXECUTION_MODE: str = "queue"  # direct | queue
+    TASK_QUEUE_IDLE_POLL_SECONDS: int = 60
     OUTPUT_LANGUAGE: str = "en"
     PORT: int = 8000
     SENTRY_DSN: Optional[str] = None
@@ -53,7 +61,7 @@ class ConfigService:
         "openai":      {"enabled": True,  "default_model": "gpt-4o",                   "temperature": 0.7, "max_tokens": 4096},
         "openrouter":  {"enabled": True,  "default_model": "google/gemini-2.0-flash",  "temperature": 0.7, "max_tokens": 8192},
         "gemini":      {"enabled": True,  "default_model": "gemini-2.0-flash",         "temperature": 0.7, "max_tokens": 8192},
-        "amd":         {"enabled": True,  "default_model": "gpt-4o",                   "temperature": 0.7, "max_tokens": 4096, "base_url": "https://inference.do-ai.run/v1"},
+        "amd":         {"enabled": True,  "default_model": "llama-3.3-70b-instruct",                   "temperature": 0.7, "max_tokens": 4096, "base_url": "https://inference.do-ai.run/v1"},
         "ollama":      {"enabled": True,  "default_model": "llama3.1:8b",              "temperature": 0.7, "base_url": "http://localhost:11434"},
     }
 
@@ -63,7 +71,7 @@ class ConfigService:
         cache_key = f"provider:{provider}"
         if cache_key in cls._cache:
             return cls._cache[cache_key]
-        
+
         db = cls._get_supabase()
         if db:
             try:
@@ -83,7 +91,7 @@ class ConfigService:
         cache_key = f"global:{key}"
         if cache_key in cls._cache:
             return cls._cache[cache_key]
-        
+
         db = cls._get_supabase()
         if db:
             try:
@@ -93,11 +101,7 @@ class ConfigService:
                     return cls._cache[cache_key]
             except Exception:
                 pass
-
+        
         return default
-
-    @classmethod
-    def invalidate_cache(cls) -> None:
-        cls._cache.clear()
 
 config_service = ConfigService()

@@ -86,7 +86,43 @@ Run:
 
 This adds triggers for project, task, agent, and profile mutations.
 
-### 7. Manager Role
+### 7. Task Claims
+
+Apply before using normalized claim/evidence extraction.
+
+Run:
+
+```sql
+-- database/add_task_claims.sql
+```
+
+This creates `task_claims`, where structured task outputs can persist extracted claims, entities, normalized entity keys, claim hashes, source URLs, and confidence values.
+
+### 8. Entity Aliases
+
+Apply when extracted claims should canonicalize entity aliases before deduplication.
+
+Run:
+
+```sql
+-- database/add_entity_aliases.sql
+```
+
+This creates `project_entity_aliases`, where project-scoped aliases can map multiple names to one canonical `entity_key`.
+
+### 9. Project Budgets
+
+Apply before using per-project token/cost budgets or budget APIs.
+
+Run:
+
+```sql
+-- database/add_project_budgets.sql
+```
+
+This creates `project_budgets` and `project_usage_events`. Budgets are optional: projects without a budget row continue to execute normally.
+
+### 10. Manager Role
 
 Apply when admin settings need to assign `manager`.
 
@@ -96,17 +132,25 @@ Run:
 -- database/add_profile_manager_role.sql
 ```
 
-### 8. Profile RLS Recursion Fix
+### 11. Final Profile RLS Hardening
 
-Apply when profile/admin policies trigger recursive RLS errors.
+Apply when profile/admin policies trigger recursive RLS errors, profile creation fails with RLS, or users need to edit their own profile without being able to change `role`.
 
 Run:
+
+```sql
+-- database/fix_profiles_rls_final.sql
+```
+
+This replaces older profile policies with owner/admin policies and adds a trigger that prevents non-admin role changes.
+
+If you only need the older minimal recursion fix, run:
 
 ```sql
 -- database/fix_profiles_recursion.sql
 ```
 
-### 9. Marketplace Templates
+### 12. Marketplace Templates
 
 Apply when the Marketplace is empty or `agent_templates` does not exist.
 
@@ -116,7 +160,19 @@ Run:
 -- database/marketplace.sql
 ```
 
-### 10. Agent Ownership
+### 13. Team Permissions
+
+Apply when projects should be shared through explicit team membership rather than only `owner_id` or `is_public`.
+
+Run:
+
+```sql
+-- database/add_team_permissions.sql
+```
+
+This creates `teams`, `team_members`, adds `projects.team_id`, and replaces project/task policies with owner-or-team access checks. If `task_claims`, `project_entity_aliases`, `project_budgets`, or `project_usage_events` already exist, the migration also updates their read policies to use `can_view_project(project_id)` so team members can read project evidence and budget status.
+
+### 14. Agent Ownership
 
 Apply when deploying marketplace agents fails because `agents.user_id` is missing or RLS blocks inserts.
 
@@ -126,7 +182,7 @@ Run:
 -- database/agent_ownership.sql
 ```
 
-### 11. Task Dependencies
+### 13. Task Dependencies
 
 Apply when dependency links do not persist.
 
@@ -176,6 +232,14 @@ WHERE table_schema = 'public'
   AND table_name = 'profiles';
 ```
 
+Check final profile RLS trigger:
+
+```sql
+SELECT tgname
+FROM pg_trigger
+WHERE tgname = 'protect_profile_role_trigger';
+```
+
 Check marketplace templates:
 
 ```sql
@@ -216,4 +280,21 @@ SELECT tgname
 FROM pg_trigger
 WHERE tgname LIKE 'audit_%_mutations'
 ORDER BY tgname;
+```
+
+Check task claims:
+
+```sql
+SELECT column_name, data_type
+FROM information_schema.columns
+WHERE table_schema = 'public'
+  AND table_name = 'task_claims';
+```
+
+Check team permission helpers:
+
+```sql
+SELECT proname
+FROM pg_proc
+WHERE proname IN ('is_team_member', 'can_admin_team', 'can_view_project', 'can_edit_project');
 ```

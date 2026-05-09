@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../services/supabase';
-import { Star, Download, Search } from 'lucide-react';
+import { Star, Download, Search, Users } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 interface AgentTemplate {
@@ -13,6 +13,9 @@ interface AgentTemplate {
   category: string;
   description: string;
   is_featured: boolean;
+  team_id?: string;
+  is_public: boolean;
+  teams?: { name: string };
 }
 
 const Marketplace: React.FC = () => {
@@ -22,6 +25,7 @@ const Marketplace: React.FC = () => {
   const [deployingId, setDeployingId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [activeFilter, setActiveFilter] = useState<'all' | 'public' | 'team'>('all');
 
   useEffect(() => {
     const fetchTemplates = async () => {
@@ -29,7 +33,10 @@ const Marketplace: React.FC = () => {
       setError(null);
       const { data, error: templateError } = await supabase
         .from('agent_templates')
-        .select('*')
+        .select(`
+          *,
+          teams:team_id(name)
+        `)
         .order('category', { ascending: true })
         .order('name', { ascending: true });
 
@@ -82,23 +89,21 @@ const Marketplace: React.FC = () => {
 
       if (insertError) throw insertError;
       setMessage(`${template.name} has been added to your agent fleet.`);
-    } catch (e) {
-      const message =
-        e instanceof Error
-          ? e.message
-          : typeof e === 'object' && e !== null && 'message' in e
-          ? String((e as { message?: unknown }).message)
-          : 'Unknown error';
-      setError(`Failed to deploy agent: ${message}`);
+    } catch (e: any) {
+      setError(`Failed to deploy agent: ${e.message || 'Unknown error'}`);
     } finally {
       setDeployingId(null);
     }
   };
 
-  const filteredTemplates = templates.filter(t => 
-    t.name.toLowerCase().includes(search.toLowerCase()) || 
-    t.category.toLowerCase().includes(search.toLowerCase())
-  );
+  const filteredTemplates = templates.filter(t => {
+    const matchesSearch = t.name.toLowerCase().includes(search.toLowerCase()) || 
+                         t.category.toLowerCase().includes(search.toLowerCase());
+    
+    if (activeFilter === 'public') return matchesSearch && t.is_public;
+    if (activeFilter === 'team') return matchesSearch && t.team_id !== null;
+    return matchesSearch;
+  });
 
   return (
     <div className="animate-fade-in marketplace-page">
@@ -107,20 +112,43 @@ const Marketplace: React.FC = () => {
           <h2>Agent Marketplace</h2>
           <p style={{ color: 'var(--text-dim)' }}>Deploy pre-configured expert agents to your projects.</p>
         </div>
-        <div className="marketplace-search">
-          <Search size={18} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-          <input 
-            type="text" 
-            placeholder="Search experts..." 
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            style={{ 
-              width: '100%', padding: '0.8rem 1rem 0.8rem 2.5rem', 
-              background: 'rgba(255,255,255,0.05)', border: '1px solid var(--glass-border)', 
-              borderRadius: 'var(--radius-md)', color: 'white', outline: 'none'
-            }}
-          />
+        <div className="marketplace-search-container" style={{ display: 'flex', gap: 'var(--space-md)', flex: 1, justifyContent: 'flex-end' }}>
+          <div className="marketplace-search" style={{ position: 'relative', width: '300px' }}>
+            <Search size={18} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-dim)' }} />
+            <input 
+              type="text" 
+              placeholder="Search experts..." 
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              style={{ 
+                width: '100%', padding: '0.8rem 1rem 0.8rem 2.5rem', 
+                background: 'rgba(255,255,255,0.05)', border: '1px solid var(--glass-border)', 
+                borderRadius: 'var(--radius-md)', color: 'white', outline: 'none'
+              }}
+            />
+          </div>
         </div>
+      </div>
+
+      <div className="filter-tabs" style={{ display: 'flex', gap: 'var(--space-sm)', marginBottom: 'var(--space-lg)' }}>
+        <button 
+          className={`btn ${activeFilter === 'all' ? 'btn-primary' : 'btn-glass'}`}
+          onClick={() => setActiveFilter('all')}
+        >
+          All Assets
+        </button>
+        <button 
+          className={`btn ${activeFilter === 'public' ? 'btn-primary' : 'btn-glass'}`}
+          onClick={() => setActiveFilter('public')}
+        >
+          Public
+        </button>
+        <button 
+          className={`btn ${activeFilter === 'team' ? 'btn-primary' : 'btn-glass'}`}
+          onClick={() => setActiveFilter('team')}
+        >
+          Team Assets
+        </button>
       </div>
 
       {error && <div className="inline-status modal-error">{error}</div>}
@@ -139,17 +167,29 @@ const Marketplace: React.FC = () => {
             key={template.id}
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: i * 0.1 }}
+            transition={{ delay: i * 0.05 }}
             className="glass-panel hover-lift"
             style={{ padding: 'var(--space-lg)', display: 'flex', flexDirection: 'column' }}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 'var(--space-md)' }}>
-              <span style={{ 
-                padding: '0.25rem 0.75rem', background: 'rgba(255,255,255,0.1)', 
-                borderRadius: 'var(--radius-full)', fontSize: '0.75rem', fontWeight: 600, color: 'var(--accent)'
-              }}>
-                {template.category}
-              </span>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-md)' }}>
+              <div style={{ display: 'flex', gap: 'var(--space-xs)' }}>
+                <span style={{ 
+                  padding: '0.25rem 0.75rem', background: 'rgba(255,255,255,0.1)', 
+                  borderRadius: 'var(--radius-full)', fontSize: '0.75rem', fontWeight: 600, color: 'var(--accent)'
+                }}>
+                  {template.category}
+                </span>
+                {template.team_id && (
+                  <span style={{ 
+                    padding: '0.25rem 0.75rem', background: 'var(--primary)', 
+                    borderRadius: 'var(--radius-full)', fontSize: '0.75rem', fontWeight: 600, color: 'white',
+                    display: 'flex', alignItems: 'center', gap: '4px'
+                  }}>
+                    <Users size={12} />
+                    {template.teams?.name || 'Team'}
+                  </span>
+                )}
+              </div>
               {template.is_featured && <Star size={16} fill="var(--accent)" color="var(--accent)" />}
             </div>
 
@@ -158,7 +198,7 @@ const Marketplace: React.FC = () => {
               {template.description}
             </p>
 
-            <div className="marketplace-card-footer">
+            <div className="marketplace-card-footer" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 'auto' }}>
               <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{template.model}</span>
               <button
                 className="btn btn-glass"

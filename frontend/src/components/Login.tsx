@@ -1,13 +1,17 @@
 import React, { useState } from 'react';
 import { supabase } from '../services/supabase';
-import { LogIn, Mail, Lock, Bot, Globe, GitBranch } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { LogIn, Mail, Lock, UserPlus, ArrowLeft, RefreshCw, CheckCircle2 } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import AubixIcon from './AubixIcon';
 
 const Login: React.FC = () => {
+  const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [fullName, setFullName] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -19,20 +23,101 @@ const Login: React.FC = () => {
     setLoading(false);
   };
 
+  const handleSignUp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
+    setSuccess(null);
+
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: {
+          full_name: fullName,
+        }
+      }
+    });
+
+    if (error) {
+      setError(error.message);
+    } else {
+      setSuccess('Account created! You can now sign in.');
+      setIsSignUp(false);
+      setFullName('');
+    }
+    setLoading(false);
+  };
+
   return (
-    <div className="login-screen">
+    <div className="login-screen" style={{ 
+      minHeight: '100vh', 
+      display: 'flex', 
+      alignItems: 'center', 
+      justifyContent: 'center',
+      background: 'radial-gradient(circle at center, #1a1a2e 0%, #0d0d14 100%)',
+      padding: 'var(--space-md)'
+    }}>
       <motion.div 
-        initial={{ opacity: 0, scale: 0.9 }}
-        animate={{ opacity: 1, scale: 1 }}
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
         className="glass-panel login-panel"
+        style={{ width: '100%', maxWidth: '440px', padding: 'var(--space-xl)', textAlign: 'center' }}
       >
-        <div style={{ marginBottom: 'var(--space-lg)' }}>
-          <Bot size={48} color="var(--accent)" style={{ marginBottom: 'var(--space-md)' }} />
-          <h1 style={{ fontSize: '2rem', marginBottom: 'var(--space-xs)' }}>Welcome Back</h1>
-          <p style={{ color: 'var(--text-dim)' }}>Access the Aubm Orchestrator</p>
+        <div style={{ marginBottom: 'var(--space-xl)' }}>
+          <AubixIcon size={120} />
+          <h1 style={{ fontSize: '2.5rem', marginBottom: 'var(--space-xs)', fontWeight: 800 }}>
+            {isSignUp ? 'Join Aubm' : 'Welcome'}
+          </h1>
+          <p style={{ color: 'var(--text-dim)' }}>
+            {isSignUp ? 'Create your agent operator profile' : 'Access the Aubm Orchestrator'}
+          </p>
         </div>
 
-        <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)' }}>
+        {success && (
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            style={{ padding: 'var(--space-md)', background: 'rgba(16, 185, 129, 0.1)', border: '1px solid var(--success)', borderRadius: 'var(--radius-md)', color: 'var(--success)', marginBottom: 'var(--space-md)', display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}
+          >
+            <CheckCircle2 size={18} />
+            {success}
+          </motion.div>
+        )}
+
+        <form onSubmit={isSignUp ? handleSignUp : handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)' }}>
+          <AnimatePresence mode="wait">
+            {isSignUp && (
+              <motion.div 
+                key="signup-fields"
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                style={{ overflow: 'hidden' }}
+              >
+                <div style={{ position: 'relative', marginBottom: 'var(--space-md)' }}>
+                  <UserPlus size={18} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                  <input 
+                    type="text" 
+                    placeholder="Full Name" 
+                    value={fullName}
+                    onChange={(e) => setFullName(e.target.value)}
+                    required={isSignUp}
+                    style={{ 
+                      width: '100%', 
+                      padding: '0.8rem 1rem 0.8rem 2.5rem', 
+                      background: 'rgba(255,255,255,0.05)', 
+                      border: '1px solid var(--glass-border)', 
+                      borderRadius: 'var(--radius-md)',
+                      color: 'white',
+                      outline: 'none'
+                    }}
+                  />
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
           <div style={{ position: 'relative' }}>
             <Mail size={18} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
             <input 
@@ -79,38 +164,27 @@ const Login: React.FC = () => {
             type="submit" 
             className="btn btn-primary" 
             disabled={loading}
-            style={{ padding: '0.8rem', marginTop: 'var(--space-sm)' }}
+            style={{ padding: '0.85rem', marginTop: 'var(--space-sm)' }}
           >
-            {loading ? 'Authenticating...' : (
-              <>
-                <LogIn size={18} />
-                Sign In
-              </>
-            )}
+            {loading ? <RefreshCw className="spin" size={18} /> : (isSignUp ? <UserPlus size={18} /> : <LogIn size={18} />)}
+            {loading ? (isSignUp ? 'Creating...' : 'Authenticating...') : (isSignUp ? 'Create Account' : 'Sign In')}
           </button>
         </form>
 
-        {/* Social Login - Hidden for now but code preserved 
-        <div style={{ margin: 'var(--space-lg) 0', display: 'flex', alignItems: 'center', gap: 'var(--space-md)' }}>
-          <div style={{ flex: 1, height: '1px', background: 'var(--glass-border)' }}></div>
-          <span style={{ fontSize: '0.8rem', color: 'var(--text-dim)' }}>OR CONTINUE WITH</span>
-          <div style={{ flex: 1, height: '1px', background: 'var(--glass-border)' }}></div>
-        </div>
-
-        <div className="auth-provider-grid">
-          <button className="btn btn-glass" onClick={() => (window as any).handleSSOLogin?.('google')}>
-            <Globe size={18} />
-            Google
+        <div style={{ marginTop: 'var(--space-xl)', paddingTop: 'var(--space-lg)', borderTop: '1px solid var(--glass-border)' }}>
+          <button 
+            type="button" 
+            className="btn btn-glass" 
+            onClick={() => {
+              setIsSignUp(!isSignUp);
+              setError(null);
+              setSuccess(null);
+            }}
+            style={{ width: '100%' }}
+          >
+            {isSignUp ? <ArrowLeft size={18} /> : <UserPlus size={18} />}
+            {isSignUp ? 'Back to Sign In' : 'Need an account? Sign Up'}
           </button>
-          <button className="btn btn-glass" onClick={() => (window as any).handleSSOLogin?.('github')}>
-            <GitBranch size={18} />
-            GitHub
-          </button>
-        </div>
-        */}
-
-        <div style={{ marginTop: 'var(--space-lg)', fontSize: '0.85rem', color: 'var(--text-dim)' }}>
-          Enterprise authentication enabled.
         </div>
       </motion.div>
     </div>

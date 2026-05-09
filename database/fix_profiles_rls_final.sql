@@ -1,67 +1,106 @@
--- Final fix for profiles RLS to prevent recursion and solve "new row violates RLS"
--- This migration ensures users can update their own profile data (except role) safely.
+-- Final profiles RLS hardening.
+-- Fixes recursive admin policies and prevents users from escalating their role.
 
--- 1. Helper function to check if a user is an admin (already exists in fix_profiles_recursion.sql, but we redefine for safety)
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+
+-- Admin check used by RLS policies. SECURITY DEFINER avoids recursive RLS checks
+-- when reading public.profiles from inside a profile policy.
 CREATE OR REPLACE FUNCTION public.is_admin()
 RETURNS BOOLEAN AS $$
 BEGIN
   RETURN EXISTS (
-    SELECT 1 FROM public.profiles
-    WHERE id = auth.uid() AND role = 'admin'
+    SELECT 1
+    FROM public.profiles
+    WHERE id = auth.uid()
+      AND role = 'admin'
   );
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
--- 2. Drop all existing policies on profiles to start clean
+REVOKE ALL ON FUNCTION public.is_admin() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.is_admin() TO authenticated;
+GRANT EXECUTE ON FUNCTION public.is_admin() TO service_role;
+
+-- Role changes need OLD/NEW comparison, which belongs in a trigger rather than
+-- a self-referential RLS policy.
+CREATE OR REPLACE FUNCTION public.protect_profile_role()
+RETURNS TRIGGER AS $$
+DECLARE
+  jwt_role TEXT;
+BEGIN
+  jwt_role := COALESCE(current_setting('request.jwt.claim.role', true), '');
+
+  IF TG_OP = 'INSERT' THEN
+    NEW.role := COALESCE(NEW.role, 'user');
+
+    IF NEW.role <> 'user'
+       AND NOT public.is_admin()
+       AND jwt_role <> 'service_role'
+       AND current_user NOT IN ('postgres', 'supabase_admin') THEN
+      RAISE EXCEPTION 'Only admins can create elevated profiles';
+    END IF;
+
+    RETURN NEW;
+  END IF;
+
+  IF NEW.role IS DISTINCT FROM OLD.role
+     AND NOT public.is_admin()
+     AND jwt_role <> 'service_role'
+     AND current_user NOT IN ('postgres', 'supabase_admin') THEN
+    RAISE EXCEPTION 'Only admins can change profile roles';
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
+REVOKE ALL ON FUNCTION public.protect_profile_role() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.protect_profile_role() TO authenticated;
+GRANT EXECUTE ON FUNCTION public.protect_profile_role() TO service_role;
+
+DROP TRIGGER IF EXISTS protect_profile_role_trigger ON public.profiles;
+CREATE TRIGGER protect_profile_role_trigger
+BEFORE INSERT OR UPDATE ON public.profiles
+FOR EACH ROW EXECUTE FUNCTION public.protect_profile_role();
+
+-- Start from a known policy set. Drop both old and newer names.
 DROP POLICY IF EXISTS "Users can read own profile" ON public.profiles;
 DROP POLICY IF EXISTS "Users can insert own profile" ON public.profiles;
 DROP POLICY IF EXISTS "Users can update own profile" ON public.profiles;
 DROP POLICY IF EXISTS "Admins can read all profiles" ON public.profiles;
 DROP POLICY IF EXISTS "Admins can update all profiles" ON public.profiles;
+DROP POLICY IF EXISTS "Profiles are readable by owners" ON public.profiles;
+DROP POLICY IF EXISTS "Profiles are readable by admins" ON public.profiles;
+DROP POLICY IF EXISTS "Profiles are insertable by owners" ON public.profiles;
+DROP POLICY IF EXISTS "Profiles are updatable by owners" ON public.profiles;
+DROP POLICY IF EXISTS "Profiles are updatable by admins" ON public.profiles;
 
--- 3. Create clean, non-recursive policies
-
--- Anyone can read their own profile
 CREATE POLICY "Profiles are readable by owners" ON public.profiles
-    FOR SELECT
-    USING (auth.uid() = id);
+  FOR SELECT TO authenticated
+  USING (auth.uid() = id);
 
--- Admins can read all profiles
 CREATE POLICY "Profiles are readable by admins" ON public.profiles
-    FOR SELECT
-    USING (public.is_admin());
+  FOR SELECT TO authenticated
+  USING (public.is_admin());
 
--- Users can insert their own profile (initial creation)
--- We enforce that the role must be 'user' unless they are an admin (though usually admins are promoted later)
 CREATE POLICY "Profiles are insertable by owners" ON public.profiles
-    FOR INSERT
-    WITH CHECK (auth.uid() = id);
+  FOR INSERT TO authenticated
+  WITH CHECK (
+    auth.uid() = id
+    AND COALESCE(role, 'user') = 'user'
+  );
 
--- Users can update their own profile fields (full_name, avatar_url)
--- We use a simpler check: as long as the ID matches, they can update.
--- To prevent role escalation, we'd ideally use a trigger, but for RLS 
--- we can check that the NEW role matches the OLD role.
--- Note: In Supabase/Postgres RLS, you can't easily compare NEW and OLD.
--- So we allow the update IF they don't change the role OR if they are an admin.
 CREATE POLICY "Profiles are updatable by owners" ON public.profiles
-    FOR UPDATE
-    USING (auth.uid() = id)
-    WITH CHECK (
-        auth.uid() = id 
-        AND (
-            -- Either the role stays the same (we compare against the current DB value)
-            role = (SELECT p.role FROM public.profiles p WHERE p.id = id)
-            OR 
-            -- Or they are an admin
-            public.is_admin()
-        )
-    );
+  FOR UPDATE TO authenticated
+  USING (auth.uid() = id)
+  WITH CHECK (auth.uid() = id);
 
--- Admins can update any profile
 CREATE POLICY "Profiles are updatable by admins" ON public.profiles
-    FOR UPDATE
-    USING (public.is_admin());
+  FOR UPDATE TO authenticated
+  USING (public.is_admin())
+  WITH CHECK (
+    public.is_admin()
+    AND role IN ('user', 'manager', 'admin')
+  );
 
--- 4. Re-grant permissions
-GRANT EXECUTE ON FUNCTION public.is_admin() TO authenticated;
-GRANT EXECUTE ON FUNCTION public.is_admin() TO service_role;
+NOTIFY pgrst, 'reload schema';

@@ -24,7 +24,7 @@ class GroqAgent(BaseAgent):
     """
     def __init__(self, name: str, role: str, model: str = "llama-3.3-70b-versatile", system_prompt: str = None):
         # Auto-migrate decommissioned models
-        if "llama-3.1-70b" in model:
+        if "llama-3.1-70b" in model or "llama3-70b-8192" in model:
             model = "llama-3.3-70b-versatile"
             
         super().__init__(name, role, model, system_prompt)

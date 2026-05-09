@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Bot, CheckCircle2, PlusCircle, RefreshCw, X } from 'lucide-react';
+import { Bot, CheckCircle2, PlusCircle, RefreshCw, X, ShoppingBag } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { supabase } from '../services/supabase';
 import { useAuth } from '../context/useAuth';
@@ -30,6 +30,13 @@ const AgentsView: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [sharingAgent, setSharingAgent] = useState<Agent | null>(null);
+  const [shareToTeam, setShareToTeam] = useState<string | null>(null);
+  const [shareDescription, setShareDescription] = useState('');
+  const [shareCategory, setShareCategory] = useState('General');
+  const [isPublicTemplate, setIsPublicTemplate] = useState(false);
+  const [teams, setTeams] = useState<{ id: string; name: string }[]>([]);
 
   const providerModels = providerOptions.find((option) => option.id === provider)?.models ?? [];
   const isEditing = selectedAgentId !== null;
@@ -50,7 +57,17 @@ const AgentsView: React.FC = () => {
 
   useEffect(() => {
     loadAgents();
+    fetchTeams();
   }, []);
+
+  const fetchTeams = async () => {
+    try {
+      const { data } = await supabase.from('teams').select('id, name');
+      setTeams(data || []);
+    } catch (err) {
+      console.error('Failed to fetch teams');
+    }
+  };
 
   const handleProviderChange = (value: SupportedProvider) => {
     setProvider(value);
@@ -110,6 +127,33 @@ const AgentsView: React.FC = () => {
     }
 
     setSaving(false);
+  };
+
+  const handleShareTemplate = async () => {
+    if (!sharingAgent || !user) return;
+    setSaving(true);
+    try {
+      const { error } = await supabase.from('agent_templates').insert({
+        name: sharingAgent.name,
+        role: sharingAgent.role,
+        description: shareDescription || `Custom agent: ${sharingAgent.name}`,
+        model: sharingAgent.model,
+        api_provider: sharingAgent.api_provider,
+        system_prompt: sharingAgent.system_prompt,
+        category: shareCategory,
+        author_id: user.id,
+        team_id: isPublicTemplate ? null : shareToTeam,
+        is_public: isPublicTemplate
+      });
+
+      if (error) throw error;
+      setMessage('Agent shared to marketplace!');
+      setShowShareModal(false);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -190,9 +234,8 @@ const AgentsView: React.FC = () => {
           {agents.length === 0 && <p style={{ color: 'var(--text-dim)' }}>No agents created yet.</p>}
           <div className="task-list">
             {agents.map((agent) => (
-              <button
+              <div
                 key={agent.id}
-                type="button"
                 className="task-row"
                 onClick={() => selectAgent(agent)}
                 style={{
@@ -200,19 +243,115 @@ const AgentsView: React.FC = () => {
                   background: selectedAgentId === agent.id ? 'rgba(255,255,255,0.06)' : undefined,
                   borderColor: selectedAgentId === agent.id ? 'var(--accent)' : undefined,
                   textAlign: 'left',
-                  cursor: 'pointer'
+                  cursor: 'pointer',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center'
                 }}
               >
-                <div>
-                  <strong>{agent.name}</strong>
-                  <p>{agent.role || 'No role provided.'}</p>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <strong style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{agent.name}</strong>
+                  <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{agent.role || 'No role provided.'}</p>
                 </div>
-                <span>{agent.api_provider} / {agent.model}</span>
-              </button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-md)', paddingLeft: 'var(--space-md)' }}>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--accent)', whiteSpace: 'nowrap' }}>{agent.api_provider} / {agent.model}</span>
+                  <button 
+                    className="btn btn-glass btn-sm"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSharingAgent(agent);
+                      setShowShareModal(true);
+                    }}
+                    title="Share to Marketplace"
+                    style={{ padding: '8px' }}
+                  >
+                    <ShoppingBag size={14} />
+                  </button>
+                </div>
+              </div>
             ))}
           </div>
         </section>
       </div>
+
+      {/* Share Modal */}
+      {showShareModal && sharingAgent && (
+        <div className="modal-overlay" onClick={() => setShowShareModal(false)}>
+          <div className="glass-panel modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '500px' }}>
+            <div className="panel-heading">
+              <ShoppingBag size={28} color="var(--accent)" />
+              <div>
+                <h3>Share as Template</h3>
+                <p style={{ fontSize: '0.85rem', color: 'var(--text-dim)' }}>Publish '{sharingAgent.name}' to the Marketplace.</p>
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gap: 'var(--space-md)', marginTop: 'var(--space-lg)' }}>
+              <label>
+                <span>Description</span>
+                <textarea 
+                  className="glass-input" 
+                  value={shareDescription} 
+                  onChange={e => setShareDescription(e.target.value)}
+                  placeholder="What is this agent expert at?"
+                  rows={3}
+                />
+              </label>
+
+              <div className="responsive-two-col">
+                <label>
+                  <span>Category</span>
+                  <select className="glass-input" value={shareCategory} onChange={e => setShareCategory(e.target.value)}>
+                    <option value="General">General</option>
+                    <option value="Marketing">Marketing</option>
+                    <option value="Development">Development</option>
+                    <option value="Legal">Legal</option>
+                    <option value="Research">Research</option>
+                    <option value="Finance">Finance</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Visibility</span>
+                  <select 
+                    className="glass-input" 
+                    value={isPublicTemplate ? 'public' : 'team'} 
+                    onChange={e => setIsPublicTemplate(e.target.value === 'public')}
+                  >
+                    <option value="team">Share to Team</option>
+                    <option value="public">Make Public (Global)</option>
+                  </select>
+                </label>
+              </div>
+
+              {!isPublicTemplate && (
+                <label>
+                  <span>Target Team</span>
+                  <select 
+                    className="glass-input" 
+                    value={shareToTeam || ''} 
+                    onChange={e => setShareToTeam(e.target.value || null)}
+                  >
+                    <option value="">Select a team...</option>
+                    {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                  </select>
+                </label>
+              )}
+
+              <div className="button-row" style={{ marginTop: 'var(--space-lg)' }}>
+                <button className="btn btn-glass" onClick={() => setShowShareModal(false)}>Cancel</button>
+                <button 
+                  className="btn btn-primary" 
+                  onClick={handleShareTemplate}
+                  disabled={saving || (!isPublicTemplate && !shareToTeam)}
+                >
+                  <ShoppingBag size={18} />
+                  {saving ? 'Sharing...' : 'Publish to Marketplace'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </motion.div>
   );
 };

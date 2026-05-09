@@ -1,6 +1,7 @@
 from services.supabase_service import supabase
 from typing import List, Dict, Any
 import logging
+from fastapi import HTTPException
 
 logger = logging.getLogger("uvicorn")
 
@@ -9,6 +10,22 @@ class ProjectService:
     Handles the creation and management of projects and their constituent tasks.
     """
     
+    @staticmethod
+    def get_project_or_404(project_id: str) -> Dict[str, Any]:
+        """Fetches a project or raises a 404 error."""
+        project = supabase.table("projects").select("*").eq("id", project_id).single().execute().data
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        return project
+
+    @staticmethod
+    def ensure_project_is_mutable(project_id: str) -> Dict[str, Any]:
+        """Verifies project existence and that it's not locked/completed."""
+        project = ProjectService.get_project_or_404(project_id)
+        if project.get("status") == "completed":
+            raise HTTPException(status_code=409, detail="Completed projects are locked and cannot be modified.")
+        return project
+
     @staticmethod
     async def create_project(title: str, description: str, user_id: str) -> Dict[str, Any]:
         res = supabase.table("projects").insert({

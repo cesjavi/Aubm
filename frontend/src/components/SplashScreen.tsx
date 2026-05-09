@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import { Bot } from 'lucide-react';
+import AubixIcon from './AubixIcon';
 
 const SplashScreen: React.FC = () => {
   return (
@@ -31,19 +31,8 @@ const SplashScreen: React.FC = () => {
           damping: 20,
           delay: 0.2
         }}
-        style={{
-          width: '120px',
-          height: '120px',
-          borderRadius: '30px',
-          background: 'linear-gradient(135deg, var(--accent) 0%, var(--primary) 100%)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          marginBottom: 'var(--space-xl)',
-          boxShadow: '0 20px 40px rgba(110, 89, 255, 0.3)',
-        }}
       >
-        <Bot size={60} color="white" />
+        <AubixIcon size={180} />
       </motion.div>
 
       <motion.h1
