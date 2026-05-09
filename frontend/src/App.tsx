@@ -30,6 +30,7 @@ import ProjectDetail from './components/ProjectDetail';
 import AgentsView from './components/AgentsView';
 import AgentConsole from './components/AgentConsole';
 import SplashScreen from './components/SplashScreen';
+import ModeSelection from './components/ModeSelection';
 import TeamsView from './components/TeamsView';
 import AuditView from './components/AuditView';
 import { useEffect } from 'react';
@@ -50,9 +51,16 @@ const App: React.FC = () => {
   const [uiMode, setUiMode] = useState<UiMode>(() => getUiMode());
   const [isSidebarOpen, setIsSidebarOpen] = useState(() => typeof window === 'undefined' || window.innerWidth >= 900);
   const [showSplash, setShowSplash] = useState(true);
+  const [showModeSelection, setShowModeSelection] = useState(false);
 
   useEffect(() => {
-    const timer = setTimeout(() => setShowSplash(false), 2500);
+    const timer = setTimeout(() => {
+      setShowSplash(false);
+      // Only show mode selection if session exists and we haven't shown it this session
+      if (sessionStorage.getItem('aubm.modeChosen') !== 'true') {
+        setShowModeSelection(true);
+      }
+    }, 2500);
     return () => clearTimeout(timer);
   }, []);
 
@@ -80,10 +88,16 @@ const App: React.FC = () => {
   const updateUiMode = (mode: UiMode) => {
     setUiMode(mode);
     saveUiMode(mode);
+    setShowModeSelection(false);
+    sessionStorage.setItem('aubm.modeChosen', 'true');
   };
 
   if (loading || showSplash) return <AnimatePresence><SplashScreen /></AnimatePresence>;
   if (!session) return <Login />;
+  
+  if (showModeSelection) {
+    return <ModeSelection onSelect={updateUiMode} />;
+  }
 
   return (
     <div className="app-container">
