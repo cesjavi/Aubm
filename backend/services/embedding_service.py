@@ -19,6 +19,13 @@ class EmbeddingService:
             except Exception as e:
                 logger.error(f"Failed to initialize OpenAI client for embeddings: {e}")
 
+    async def get_embedding(self, text: str) -> List[float]:
+        """
+        Fetches a single embedding for a string.
+        """
+        embeddings = await self.get_embeddings([text])
+        return embeddings[0] if embeddings else []
+
     async def get_embeddings(self, texts: List[str]) -> List[List[float]]:
         """
         Batch fetches embeddings for a list of strings.
