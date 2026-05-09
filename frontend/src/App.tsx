@@ -242,7 +242,12 @@ const App: React.FC = () => {
               <span style={{ color: 'var(--success)' }}>●</span>
               <span>API Online</span>
             </div>
-            <div className="glass-panel api-status mobile-hide">
+            <div 
+              className="glass-panel api-status mobile-hide hover-glow" 
+              onClick={() => updateUiMode(uiMode === 'guided' ? 'expert' : 'guided')}
+              style={{ cursor: 'pointer', transition: 'all 0.2s ease' }}
+              title="Click to switch UI Mode"
+            >
               <span>{uiMode === 'guided' ? 'Guided Mode' : 'Expert Mode'}</span>
             </div>
           </div>
