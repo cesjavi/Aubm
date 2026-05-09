@@ -4,7 +4,7 @@ from services.supabase_service import supabase
 from services.agent_runner_service import AgentRunnerService
 from services.config import settings
 from services.audit_service import audit_service
-from services.output_quality import report_text_from_output
+from services.output_quality import report_text_from_output, validate_output
 from services.task_queue import TaskQueueService
 from services.memory_service import memory_service
 from services.project_service import project_service
@@ -23,16 +23,22 @@ def _assert_task_quality(task: dict):
         raise HTTPException(status_code=400, detail="Task output is missing or malformed.")
     if output_data.get("error"):
         raise HTTPException(status_code=400, detail=f"Task execution failed: {output_data['error']}")
+    
     rendered = report_text_from_output(output_data).strip()
     if not rendered or rendered in ("{}", "[]"):
         raise HTTPException(status_code=400, detail="Task has no usable output to approve.")
+    
     quality_review = output_data.get("quality_review")
-    if not quality_review:
-        raise HTTPException(status_code=400, detail="Task output is missing quality validation.")
-    if quality_review.get("approved"):
+    
+    # If not approved in DB, re-validate with current (potentially relaxed) rules
+    if not quality_review or not quality_review.get("approved"):
+        current_review = validate_output(task, output_data)
+        if not current_review.get("approved"):
+            reasons = current_review.get("fail_reasons") or ["Task output failed quality validation."]
+            raise HTTPException(status_code=400, detail=f"Task output failed quality review: {'; '.join(reasons)}")
+        
+        # If it's now approved by current rules, we allow it to proceed
         return
-    reasons = quality_review.get("fail_reasons") or ["Task output failed quality validation."]
-    raise HTTPException(status_code=400, detail=f"Task output failed quality review: {'; '.join(reasons)}")
 
 
 def _assert_task_project_is_mutable(task: dict):
