@@ -33,7 +33,9 @@ class GroqAgent(BaseAgent):
         self.provider_config = config_service.get_provider_config("groq")
         api_key = self.provider_config.get("api_key") or settings.GROQ_API_KEY
         
-        self.client = groq.AsyncGroq(api_key=api_key)
+        self.client = None
+        if api_key:
+            self.client = groq.AsyncGroq(api_key=api_key)
         self.temperature = self.provider_config.get("temperature", 0.7)
         self.max_tokens = self.provider_config.get("max_tokens", 4096)
         self.reasoning_effort = self.provider_config.get("reasoning_effort", "medium")
@@ -83,6 +85,13 @@ class GroqAgent(BaseAgent):
             return await self._execute_run(task_description, context, use_tools, extra_context)
 
     async def _execute_run(self, task_description: str, context: List[Dict[str, Any]], use_tools: bool = False, extra_context: str = "") -> Dict[str, Any]:
+        if not self.client:
+            return {
+                "agent_name": self.name,
+                "provider": "groq",
+                "raw_output": "Error: Groq API Key not configured.",
+                "data": {"error": "Missing credentials"}
+            }
         extra_kwargs = {}
         if "gpt-oss-" in self.model:
             extra_kwargs["reasoning_effort"] = self.reasoning_effort

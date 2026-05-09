@@ -12,11 +12,20 @@ class OpenAIAgent(BaseAgent):
         self.provider_config = config_service.get_provider_config("openai")
         api_key = self.provider_config.get("api_key") or settings.OPENAI_API_KEY
         
-        self.client = openai.AsyncOpenAI(api_key=api_key)
+        self.client = None
+        if api_key:
+            self.client = openai.AsyncOpenAI(api_key=api_key)
         self.temperature = self.provider_config.get("temperature", 0.7)
         self.max_tokens = self.provider_config.get("max_tokens", 4096)
 
     async def run(self, task_description: str, context: List[Dict[str, Any]], use_tools: bool = False, extra_context: str = "") -> Dict[str, Any]:
+        if not self.client:
+            return {
+                "agent_name": self.name,
+                "provider": "openai",
+                "raw_output": "Error: OpenAI API Key not configured.",
+                "data": {"error": "Missing credentials"}
+            }
         return await self._run_openai_compatible(
             provider="openai",
             create_fn=self.client.chat.completions.create,

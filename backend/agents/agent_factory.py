@@ -28,15 +28,14 @@ class AgentFactory:
         """
         provider = provider.lower()
         
-        # Groq Redirection Logic
+        # Fallback Logic: OpenAI -> AMD -> Groq
         if provider == "openai" and not settings.OPENAI_API_KEY:
-            # Check if we have a Groq key before redirecting
-            if settings.GROQ_API_KEY:
+            if settings.AMD_API_KEY:
+                provider = "amd"
+                model = "llama-3.3-70b-instruct"
+            elif settings.GROQ_API_KEY:
                 provider = "groq"
-                model = "llama-3.3-70b-versatile" # Robust fallback model
-            else:
-                # If neither is available, let it fail with the original provider
-                pass
+                model = "llama-3.3-70b-versatile"
 
         agent_class = PROVIDER_MAP.get(provider)
         

@@ -11,15 +11,20 @@ class EmbeddingService:
     Handles text vectorization for semantic deduplication and retrieval.
     """
     def __init__(self):
-        self.client = openai.AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+        self.client = None
         self.model = "text-embedding-3-small"
+        if settings.OPENAI_API_KEY:
+            try:
+                self.client = openai.AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+            except Exception as e:
+                logger.error(f"Failed to initialize OpenAI client for embeddings: {e}")
 
     async def get_embeddings(self, texts: List[str]) -> List[List[float]]:
         """
         Batch fetches embeddings for a list of strings.
         """
-        if not settings.OPENAI_API_KEY:
-            logger.warning("OPENAI_API_KEY not configured. Semantic features disabled.")
+        if not settings.OPENAI_API_KEY or not self.client:
+            logger.debug("OpenAI embeddings not available (missing key or initialization failed).")
             return []
             
         if not texts:
